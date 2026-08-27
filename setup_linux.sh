@@ -14,29 +14,42 @@
 set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_DIR="${BEN_VENV:-$HOME/ben}"
+VENV_DIR="${BEN_VENV:-$HOME/ben-venv}"
 DOTNET_DIR="${DOTNET_ROOT:-$HOME/.dotnet}"
 
 echo "[ben-setup] repo:  $REPO_DIR"
 echo "[ben-setup] venv:  $VENV_DIR"
 
-# The vendored bin/dds3-linux extension and the package names below assume
-# Ubuntu 24.04 (Python 3.12, glibc 2.39, libicu74).
-. /etc/os-release 2>/dev/null || true
-if [ "${VERSION_ID:-}" != "24.04" ]; then
-    echo "[ben-setup] WARNING: expected Ubuntu 24.04 but found '${PRETTY_NAME:-unknown}'."
-    echo "            The vendored dds3 .so needs glibc >= 2.38 and Python 3.12;"
-    echo "            on an older distro it will fail to import (see src/ddsolver/README.md)."
+if [ "$VENV_DIR" = "$REPO_DIR" ]; then
+    echo "[ben-setup] BEN_VENV must not be the repo itself ($REPO_DIR)." >&2
+    exit 1
 fi
+
+# The vendored bin/dds3-linux extension needs glibc >= 2.38 and Python 3.12, and
+# libicu is versioned per release: 24.04 ships 74, 25.x/26.x ship 78. Asking for
+# the wrong one is a hard apt failure, so pick it from the box.
+. /etc/os-release 2>/dev/null || true
+case "${VERSION_ID:-}" in
+    24.04)     ICU_PKG=libicu74 ;;
+    25.*|26.*) ICU_PKG=libicu78 ;;
+    *)
+        ICU_PKG=libicu78
+        echo "[ben-setup] WARNING: unrecognised '${PRETTY_NAME:-unknown}'; guessing $ICU_PKG."
+        echo "            See src/ddsolver/README.md if the dds3 import fails." ;;
+esac
+
+# Containers run as root and usually ship no sudo.
+SUDO=sudo
+[ "$(id -u)" -eq 0 ] && SUDO=""
 
 # 1. System packages
 #    python3-gdbm: gives shelve a real dbm backend (without it shelve uses
 #    dbm.dumb, which chmods its files and fails on filesystems such as WSL /mnt).
-echo "[ben-setup] installing system packages (sudo) ..."
-sudo apt-get update
-sudo apt-get install -y \
+echo "[ben-setup] installing system packages ($ICU_PKG) ..."
+$SUDO apt-get update
+$SUDO apt-get install -y \
     python3.12 python3.12-venv python3-pip python3-gdbm \
-    libicu74 curl libboost-thread-dev
+    "$ICU_PKG" curl libboost-thread-dev
 
 # 2. Python venv + requirements (venv inherits the system stdlib, incl. _gdbm)
 if [ ! -d "$VENV_DIR" ]; then
