@@ -25,18 +25,7 @@ absl.logging.get_absl_handler().python_handler.stream = open(os.devnull, 'w')
 absl.logging.set_verbosity(absl.logging.FATAL)
 absl.logging.set_stderrthreshold(absl.logging.FATAL)
 
-import tensorflow as tf
-
-gpus = tf.config.list_physical_devices('GPU')
-if gpus:
-    try:
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-        print("GPU available and memory growth enabled.")
-    except RuntimeError as e:
-        print("Error setting memory growth:", e)
-else:
-    print("No GPU detected, using CPU.")
+from nn import framework
 
 
 import socket
@@ -1059,15 +1048,9 @@ async def main():
         sys.stderr.write(f"PythonNet: {util.get_pythonnet_version()}\n") 
         sys.stderr.write(f"{util.check_dotnet_version()}\n") 
 
-    # Try to fetch Keras version or handle older TensorFlow versions
-    try:
-        keras_version = tf.keras.__version__
-    except AttributeError:
-        keras_version = "Not integrated with TensorFlow"
-        configfile = configfile.replace("default.conf", "TF1.x/default_tf1x.conf")
 
     # Write to stderr
-    sys.stderr.write(f"Loading TensorFlow {tf.__version__} - Keras version: {keras_version}\n")
+    sys.stderr.write(f"{framework.banner()}\n")
     sys.stderr.write(f"NumPy Version : {np.__version__}\n")
 
     configuration = conf.load(configfile)
