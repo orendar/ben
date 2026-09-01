@@ -30,10 +30,15 @@ quantizes the input before the graph's cast back to `float32`.
 
 Agreement with Keras is 5.0e-6 worst case across the 16 benchmark models
 (`tests/test_torch_parity.py`, references recorded by
-`scripts/make_parity_fixtures.py`). On eight full auctions the two backends
-produced identical bids, with neural-network time down 1.63x and end-to-end wall
-down 1.10x — double-dummy solving, not inference, is what a bid costs.
+`scripts/make_parity_fixtures.py`).
 
-Bit-identical output is not guaranteed and should not be assumed: the thresholds
-in `[bidding]` are hard cutoffs on these probabilities, so a different backend
-can move a bid. Re-validate any cached benchmark results after switching.
+That is float32 round-off, but it is not free: on 2,000 replayed positions the
+torch backend returned **2 different bids (0.10%)** where TensorFlow returned 0
+on the identical set. The `[bidding]` thresholds are hard cutoffs on these
+probabilities, so round-off flips a candidate set discretely and the search then
+diverges. **Numbers measured against a torch server are not comparable to
+TensorFlow-served ones** — re-baseline any cached benchmark results.
+
+What it buys: neural-network time down 1.63x, end-to-end wall down 1.06x
+(6.34 vs 5.98 bids/s over those 2,000 positions, 8 servers each). Double-dummy
+solving is ~62% of a bid and inference ~22%, so the backend is a small lever.
