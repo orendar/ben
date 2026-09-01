@@ -5,70 +5,18 @@ from configparser import ConfigParser
 
 from nn.model_path_provider import IsolatedModelPathProvider, find_best_temp_drive
 
-# Every backend is loaded lazily, so a `.pt` deployment never imports
-# TensorFlow and a `.keras` one never imports torch or onnxruntime.
-BACKENDS = {'.pt': 'torch', '.onnx': 'onnx', '.keras': 'tf2'}
-MODULES = {
-    'Leader': 'leader',
-    'BatchPlayer': 'player',
-    'BidInfo': 'bid_info',
-    'LeadSingleDummy': 'lead_singledummy',
-    'Contract': 'contract',
-    'Bidder': 'bidder',
-    'Trick': 'trick',
-}
-_classes = {}
+from nn.bidder import Bidder
+from nn.bid_info import BidInfo
+from nn.contract import Contract
+from nn.lead_singledummy import LeadSingleDummy
+from nn.leader import Leader
+from nn.player import BatchPlayer
+from nn.trick import Trick
 
-
-def backend_of(model_path):
-    for suffix, backend in BACKENDS.items():
-        if model_path.endswith(suffix):
-            return backend
-    return 'tf2'
-
-
-def _get_class(name, model_path):
-    """Resolve e.g. ('Bidder', 'models/torch/x.pt') to nn.bidder_torch.Bidder."""
-    backend = backend_of(model_path)
-    if (name, backend) not in _classes:
-        if name not in MODULES:
-            raise ValueError(f"Unknown model wrapper: {name}")
-        module = __import__(f"nn.{MODULES[name]}_{backend}", fromlist=[name])
-        _classes[(name, backend)] = getattr(module, name)
-    return _classes[(name, backend)]
-
-
-# Auto-detection factory functions based on file extension
-def Leader(model_path):
-    return _get_class('Leader', model_path)(model_path)
-
-
-def BatchPlayer(name, model_path):
-    return _get_class('BatchPlayer', model_path)(name, model_path)
-
-
-def BidInfo(model_path):
-    return _get_class('BidInfo', model_path)(model_path)
-
-
-def LeadSingleDummy(model_path):
-    return _get_class('LeadSingleDummy', model_path)(model_path)
-
-
-def Contract(model_path):
-    return _get_class('Contract', model_path)(model_path)
-
-
-def Bidder(name, model_path, alert_supported):
-    return _get_class('Bidder', model_path)(name, model_path, alert_supported)
-
-
-def Trick(model_path):
-    return _get_class('Trick', model_path)(model_path)
 
 class Models:
 
-    def __init__(self, name, tf_version, model_version, n_cards_bidding, n_cards_play, bidder_model, opponent_model, contract_model, trick_model,binfo_model, lead_suit_model, lead_nt_model, sd_model, sd_model_no_lead, player_models, search_threshold, lead_threshold, 
+    def __init__(self, name, model_version, n_cards_bidding, n_cards_play, bidder_model, opponent_model, contract_model, trick_model,binfo_model, lead_suit_model, lead_nt_model, sd_model, sd_model_no_lead, player_models, search_threshold, lead_threshold, 
                  no_search_threshold, eval_after_bid_count, eval_opening_bid,eval_pass_after_bid_count, no_biddingqualitycheck_after_bid_count, min_passout_candidates, min_rescue_reward, min_bidding_trust_for_sample_when_rescue, max_estimated_score,
                  lead_accept_nn, ns, ew, bba_our_cc, bba_their_cc, use_bba, consult_bba, bba_trust, use_bba_rollout, use_bba_to_count_aces, estimator, claim, play_reward_threshold_NN, play_reward_threshold_NN_factor_IMP, play_reward_threshold_NN_factor_MP, check_remaining_cards, check_discard, double_dummy, lead_from_pips_nt, lead_from_pips_suit, min_opening_leads, sample_hands_for_review, use_biddingquality, use_biddingquality_in_eval, 
                  double_dummy_calculator, opening_lead_included, use_probability, matchpoint, pimc_verbose, pimc_use_declaring, pimc_use_defending, pimc_use_discarding, pimc_wait, pimc_start_trick_declarer, pimc_start_trick_defender, pimc_stop_trick_declarer, pimc_stop_trick_defender, pimc_constraints, 
@@ -86,7 +34,6 @@ class Models:
                  reward_lead_partner_suit, trump_lead_penalty
                  ):
         self.name = name
-        self.tf_version = tf_version
         self.model_version = model_version
         self.n_cards_bidding = n_cards_bidding
         self.n_cards_play = n_cards_play
@@ -236,7 +183,6 @@ class Models:
         if base_path is None:
             base_path = os.getenv('BEN_HOME') or '..'
         name = conf.get('models', 'name', fallback="BEN")
-        tf_version = conf.getint('models', 'tf_version', fallback=2)
         model_version = conf.getint('models', 'model_version', fallback=2)
         n_cards_bidding = conf.getint('models', 'n_cards_bidding', fallback=32)
         n_cards_play = conf.getint('models', 'n_cards_play', fallback=32)
@@ -431,7 +377,6 @@ class Models:
 
         return cls(
             name=name,
-            tf_version=tf_version,
             model_version=model_version,
             n_cards_bidding=n_cards_bidding,
             n_cards_play=n_cards_play,

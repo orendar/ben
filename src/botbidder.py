@@ -133,10 +133,6 @@ class BotBid:
         if not self.models.check_final_contract:
             return False
 
-        if self.models.tf_version == 1:
-            sys.stderr.write("Rescue bid not supported for TF 1.x\n")
-            return False
-
         # If no samples we can't evaluate rescue bid
         if len(samples) == 0:
             return False

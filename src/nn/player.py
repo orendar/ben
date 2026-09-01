@@ -1,4 +1,4 @@
-"""Torch-backed BatchPlayer - API compatible with player_tf2.BatchPlayer."""
+"""BatchPlayer: BEN's player network."""
 
 from nn.timing import ModelTimer
 from nn.torch_config import create_model, run

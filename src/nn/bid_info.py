@@ -1,4 +1,4 @@
-"""Torch-backed BidInfo - API compatible with bid_info_tf2.BidInfo."""
+"""BidInfo: BEN's bid info network."""
 
 from nn.timing import ModelTimer
 from nn.torch_config import create_model, run

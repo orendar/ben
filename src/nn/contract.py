@@ -1,4 +1,4 @@
-"""Torch-backed Contract - API compatible with contract_tf2.Contract."""
+"""Contract: BEN's contract network."""
 
 from nn.timing import ModelTimer
 from nn.torch_config import create_model, run

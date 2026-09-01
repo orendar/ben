@@ -19,8 +19,7 @@ WORKDIR /app
 # noble enforces PEP 668 (externally-managed) - the container is the isolated env
 RUN pip install --break-system-packages -r requirements.txt
 
-# Suppress TensorFlow/CUDA warnings (no GPU in container)
-ENV TF_CPP_MIN_LOG_LEVEL=2
+# No GPU in the container; torch runs the networks on CPU
 ENV CUDA_VISIBLE_DEVICES=""
 
 COPY src/frontend /app/frontend/

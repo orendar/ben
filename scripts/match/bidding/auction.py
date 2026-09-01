@@ -12,7 +12,6 @@ sys.path.append('../../../src')
 
 import logging
 
-# Intil fixed in Keras, this is needed to remove a wrong warning
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -26,7 +25,7 @@ absl.logging.get_absl_handler().python_handler.stream = open(os.devnull, 'w')
 absl.logging.set_verbosity(absl.logging.FATAL)
 absl.logging.set_stderrthreshold(absl.logging.FATAL)
 
-import tensorflow as tf
+from nn import framework
 
 import argparse
 import json
@@ -113,17 +112,9 @@ if __name__ == '__main__':
 
     np.set_printoptions(precision=2, suppress=True)
 
-    sys.stderr.write(f"Loading tensorflow {tf.__version__}\n")
+    sys.stderr.write(f"{framework.banner()}\n")
     sys.stderr.write(f"NumPy Version : {np.__version__}\n")
-    try:
-        if configuration_ns["models"]['tf_version'] == "2":
-            from nn.models_tf2 import Models
-        else: 
-            # Default to version 1. of Tensorflow
-            from nn.models_tf2 import Models
-    except KeyError:
-            # Default to version 1. of Tensorflow
-            from nn.models_tf2 import Models
+    from nn.models import Models
 
 
     models_ns = Models.from_conf(configuration_ns,"../../..")

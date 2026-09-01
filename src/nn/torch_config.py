@@ -1,13 +1,13 @@
 """Shared torch settings for all models.
 
 A gameapi pool runs one server per core, so on CPU each process must stay
-single-threaded; letting torch size its own pool reproduces the TensorFlow
-oversubscription that cost 11x (docs: "Pin TF's thread pools").
+single-threaded; letting torch size its own pool oversubscribes every core.
 
-`BEN_TORCH_DEVICE=cuda` moves inference to the GPU, which is worth ~12x on the
-real call mix because the bidder is called on batches of hundreds to thousands
-of sampled auctions, not one at a time. It is off by default: a benchmark
-against another engine wants the GPU for that engine, not for BEN.
+Inference runs on the GPU whenever there is one, which is worth ~12x on the real
+call mix because the bidder is called on batches of hundreds to thousands of
+sampled auctions, not one at a time. Set `BEN_TORCH_DEVICE=cpu` to force it off:
+a 16-server pool holds ~11.8 GB of VRAM, so it will contend with anything else
+training on the same card.
 """
 
 import os
@@ -18,7 +18,7 @@ import torch
 from nn.torch_graph import load_graph
 
 THREADS = int(os.environ.get("BEN_TORCH_THREADS", "1"))
-DEVICE = os.environ.get("BEN_TORCH_DEVICE", "cpu")
+DEVICE = os.environ.get("BEN_TORCH_DEVICE") or ("cuda" if torch.cuda.is_available() else "cpu")
 _configured = False
 
 

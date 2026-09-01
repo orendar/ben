@@ -1,7 +1,7 @@
-"""Torch runtime for the converted Keras models.
+"""Torch runtime for BEN's networks.
 
 A `.pt` produced by `scripts/convert_keras_to_torch.py` holds a JSON graph spec
-plus a state dict; nothing here reads Keras, HDF5 or TensorFlow.
+plus a state dict; nothing here reads HDF5 or any training framework.
 """
 
 import json

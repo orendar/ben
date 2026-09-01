@@ -1,4 +1,4 @@
-"""Torch-backed Leader - API compatible with leader_tf2.Leader."""
+"""Leader: BEN's leader network."""
 
 from nn.timing import ModelTimer
 from nn.torch_config import create_model, run

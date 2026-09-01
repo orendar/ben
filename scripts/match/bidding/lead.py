@@ -64,16 +64,7 @@ if __name__ == '__main__':
 
     configuration = conf.load(args.bidder)
 
-    try:
-        if configuration["models"]['tf_version'] == "2":
-            sys.stderr.write("Loading version 2\n")
-            from nn.models_tf2 import Models
-        else: 
-            # Default to version 1. of Tensorflow
-            from nn.models_tf2 import Models
-    except KeyError:
-            # Default to version 1. of Tensorflow
-            from nn.models_tf2 import Models
+    from nn.models import Models
 
     models = Models.from_conf(configuration,"../../..")
     sampler = Sample.from_conf(configuration)

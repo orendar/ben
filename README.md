@@ -17,7 +17,7 @@ If you like the software, please consider making a donation to support the devel
 
 ### Installation
 
-The engine runs on **Python 3.12**, with the neural networks using TensorFlow 2.18.1 (Keras 3.5.x). All platforms standardise on Python 3.12.
+The engine runs on **Python 3.12**, with the neural networks running on PyTorch (see [README-models.md](README-models.md)). All platforms standardise on Python 3.12.
 
 The recommended way of installing is in a [conda environment](https://docs.conda.io/en/latest/miniconda.html) (see [conda_setup.sh](conda_setup.sh)), but it can also be run in a plain `venv` / system Python 3.12 via `pip install -r requirements.txt`.
 

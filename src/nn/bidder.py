@@ -1,4 +1,4 @@
-"""Torch-backed Bidder - API compatible with bidder_tf2.Bidder."""
+"""Bidder: BEN's bidder network."""
 
 import numpy as np
 

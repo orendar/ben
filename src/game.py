@@ -1125,15 +1125,7 @@ async def main():
 
     configuration = conf.load(configfile)
 
-    try:
-        if (configuration["models"]['tf_version'] == "2"):
-            from nn.models_tf2 import Models
-        else: 
-            # Default to version 1. of Tensorflow
-            from nn.models_tf2 import Models
-    except KeyError:
-            # Default to version 1. of Tensorflow
-            from nn.models_tf2 import Models
+    from nn.models import Models
            
     print("Config:", configfile)
     if opponentfile != "":

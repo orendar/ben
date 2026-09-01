@@ -10,8 +10,8 @@ conda install gdbm
 
 # All other Python dependencies live in requirements.txt - the single source of
 # truth. Run this from the repository root and keep the two in sync by editing
-# requirements.txt only. (Pins of note: keras 3.5.X - the version the models
-# were trained on - and tensorflow 2.18.1.)
+# requirements.txt only. (Pin of note: torch, which runs every model;
+# see README-torch.md.)
 pip install -r requirements.txt
 
 # Only needed to build the standalone executables, not to run BEN.

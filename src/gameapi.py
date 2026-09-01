@@ -564,15 +564,7 @@ sys.stderr.write(f"NumPy Version : {np.__version__}\n")
 
 configuration = conf.load(configfile)
 
-try:
-    if (configuration["models"]['tf_version'] == "2"):
-        from nn.models_tf2 import Models
-    else: 
-        # Default to version 1. of Tensorflow
-        from nn.models_tf2 import Models
-except KeyError:
-        # Default to version 1. of Tensorflow
-        from nn.models_tf2 import Models
+from nn.models import Models
 
 models = Models.from_conf(configuration, config_path.replace(os.path.sep + "src",""), verbose)
     

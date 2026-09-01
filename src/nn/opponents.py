@@ -2,7 +2,7 @@ import os
 import os.path
 
 from configparser import ConfigParser
-from nn.models_tf2 import Bidder
+from nn.models import Bidder
 
 class Opponents:
 
