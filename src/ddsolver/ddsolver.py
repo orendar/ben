@@ -81,11 +81,11 @@ def _load_dds3():
 dds3 = _load_dds3()
 
 
-# DDS 3.0.0 removed internal multi-threading from the legacy batch API
-# (SolveAllBoards now solves sequentially). The modern model is one
-# SolverContext per worker thread; DDSolver parallelises with a thread pool,
-# and solve_board_pbn releases the GIL during the solve, so the threads run
-# concurrently. Each pool thread keeps its own SolverContext.
+# One SolverContext per worker thread; solve_board_pbn releases the GIL during
+# the solve, so the pool threads run concurrently. 3.1.0 also parallelises the
+# batch API internally, but it defaults to every hardware thread -- any move to
+# solve_all_boards_pbn must pass max_threads explicitly or a server pool will
+# oversubscribe the box.
 _ctx_local = threading.local()
 
 
@@ -116,7 +116,7 @@ class DDSolver:
             sys.stderr.write(f"DDSolver loaded — DDS {self.version()} - dds mode {dds_mode} - {workers} solver threads\n")
 
     def version(self):
-        return "3.0.0"
+        return "3.1.0"
 
     def calculatepar(self, hand, vuln, print_result=True):
         with ModelTimer.time_call('dds_par'):
