@@ -14,9 +14,12 @@ import torch
 from conftest import FIXTURES, TORCH_MODELS
 from nn.torch_graph import load_graph
 
-# Measured worst case is 5.0e-6 (righty_suit), i.e. float32 round-off; a wrong
-# LSTM gate order or a missed BatchNormalization lands orders of magnitude over.
+# Relative to each output's peak, because the bidinfo shape head predicts suit
+# lengths (0-13) while every other head is a probability. Measured worst: 5.0e-6
+# on CPU, 5.7e-5 on CUDA, where cuDNN's fused recurrence accumulates differently.
+# A wrong LSTM gate order or a missed BatchNormalization lands orders over both.
 TOLERANCE = 1e-4
+CUDA_TOLERANCE = 5e-4
 
 NAMES = sorted(f[: -len(".npz")] for f in os.listdir(FIXTURES) if f.endswith(".npz"))
 
@@ -42,6 +45,10 @@ def run(graph, inputs):
         return graph(*[torch.from_numpy(x) for x in inputs])
 
 
+def relative(got, expected):
+    return np.max(np.abs(got - expected)) / max(float(np.max(np.abs(expected))), 1e-9)
+
+
 def test_matches_keras_reference(model_case):
     name, graph, inputs, expected = model_case
     got = run(graph, inputs)
@@ -49,8 +56,8 @@ def test_matches_keras_reference(model_case):
     for i, (a, b) in enumerate(zip(got, expected)):
         a = a.numpy()
         assert a.shape == b.shape, f"{name} out{i}: {a.shape} != {b.shape}"
-        diff = np.max(np.abs(a - b))
-        assert diff < TOLERANCE, f"{name} out{i}: max abs diff {diff:.3g}"
+        diff = relative(a, b)
+        assert diff < TOLERANCE, f"{name} out{i}: relative diff {diff:.3g}"
 
 
 def test_probabilities_stay_normalized(model_case):
@@ -71,11 +78,31 @@ def test_deterministic(model_case):
         assert np.array_equal(a, b), f"{name} out{i}: repeated call differs"
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="no GPU")
+def test_cuda_matches_keras_reference(model_case):
+    """BEN_TORCH_DEVICE=cuda must not cost accuracy - cudnn.allow_tf32 would."""
+    name, graph, inputs, expected = model_case
+    matmul_tf32, cudnn_tf32 = torch.backends.cuda.matmul.allow_tf32, torch.backends.cudnn.allow_tf32
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
+    try:
+        graph.to("cuda")
+        with torch.no_grad():
+            got = graph(*[torch.from_numpy(x).to("cuda") for x in inputs])
+        for i, (a, b) in enumerate(zip(got, expected)):
+            diff = relative(a.cpu().numpy(), b)
+            assert diff < CUDA_TOLERANCE, f"{name} out{i}: relative diff {diff:.3g} on cuda"
+    finally:
+        graph.to("cpu")
+        torch.backends.cuda.matmul.allow_tf32 = matmul_tf32
+        torch.backends.cudnn.allow_tf32 = cudnn_tf32
+
+
 def test_rows_are_independent(model_case):
     """Dropout left on, or a batch-statistics BatchNormalization, breaks this."""
     name, graph, inputs, _ = model_case
     batched = [t.numpy() for t in run(graph, inputs)]
     single = [t.numpy() for t in run(graph, [x[:1] for x in inputs])]
     for i, (whole, row) in enumerate(zip(batched, single)):
-        diff = np.max(np.abs(whole[:1] - row))
+        diff = relative(whole[:1], row)
         assert diff < TOLERANCE, f"{name} out{i}: row 0 depends on the batch ({diff:.3g})"

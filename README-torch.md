@@ -42,3 +42,23 @@ TensorFlow-served ones** — re-baseline any cached benchmark results.
 What it buys: neural-network time down 1.63x, end-to-end wall down 1.06x
 (6.34 vs 5.98 bids/s over those 2,000 positions, 8 servers each). Double-dummy
 solving is ~62% of a bid and inference ~22%, so the backend is a small lever.
+
+## GPU
+
+`BEN_TORCH_DEVICE=cuda` is worth it because the bidder is called on batches of
+hundreds to thousands of sampled auctions, not one at a time — only 13% of calls
+are batch-1, and they are 0.7% of the time. On an RTX 5090, inference drops 8.5x
+against TensorFlow and 5.2x against torch on CPU, taking a bidding board from
+100.9 s (TF) to 79.8 s for the same eight boards, all auctions identical.
+
+Measure before assuming it is free: it costs ~740 MB of VRAM per server process,
+and divergence rises with the looser arithmetic — 6 changed bids in 2,000 (0.30%)
+against TF's 0, where torch on CPU changed 2. Serve a GPU pool from its own
+response cache.
+
+**Do not spend more effort here.** `torch.compile`/Triton autotuning is within
+noise of plain eager (4.42 vs 4.45 ms on the largest real shape) because cuDNN's
+fused LSTM already wins; TF32 buys 5% for 30x the error, and bfloat16 is not
+faster at these sizes. Inference is now 3.3% of a board and double-dummy solving
+is 78%, so the whole remaining prize is 1.03x. `scripts/bench_bidder.py`
+re-derives all of this on a new box in a minute.
