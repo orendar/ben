@@ -1,7 +1,6 @@
 import time
 import sys
 import numpy as np
-import tensorflow as tf
 
 import binary
 import deck52
@@ -615,7 +614,7 @@ class BotBid:
                 X = self.get_binary_contract(self.seat, self.vuln, self.hand_str, sample[(self.seat + 2) % 4], self.models.n_cards_bidding)
                 # Perhaps we should collect all samples, and just make one call to the neural network
                 contracts = self.models.contract_model.pred_fun(X)
-                if tf.is_tensor(contracts):
+                if hasattr(contracts, 'numpy'):
                     contracts = contracts.numpy()
                 score = 0
                 result = {}

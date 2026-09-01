@@ -30,7 +30,7 @@ absl.logging.get_absl_handler().python_handler.stream = open(os.devnull, 'w')
 absl.logging.set_verbosity(absl.logging.FATAL)
 absl.logging.set_stderrthreshold(absl.logging.FATAL)
 
-import tensorflow as tf
+from nn import framework
 import psutil
 
 from gevent.pywsgi import WSGIServer
@@ -81,7 +81,6 @@ warnings.filterwarnings("ignore")
 # Set logging level to suppress warnings
 logging.getLogger().setLevel(logging.CRITICAL)
 # Just disables the warnings
-import tensorflow as tf
 from nn.opponents import Opponents
 
 from flask_limiter import Limiter
@@ -558,15 +557,9 @@ if sys.platform == 'win32':
     sys.stderr.write(f"PythonNet: {util.get_pythonnet_version()}\n") 
     sys.stderr.write(f"{util.check_dotnet_version()}\n") 
 
-# Try to fetch Keras version or handle older TensorFlow versions
-try:
-    keras_version = tf.keras.__version__
-except AttributeError:
-    keras_version = "Not integrated with TensorFlow"
-    configfile = configfile.replace("default.conf", "TF1.x/default_tf1x.conf")
 
 # Write to stderr
-sys.stderr.write(f"Loading TensorFlow {tf.__version__} - Keras version: {keras_version}\n")
+sys.stderr.write(f"{framework.banner()}\n")
 sys.stderr.write(f"NumPy Version : {np.__version__}\n")
 
 configuration = conf.load(configfile)
@@ -664,7 +657,7 @@ if not os.path.exists(log_file_path):
 
 print(f"Setting seed = {seed}")
 np.random.seed(seed)
-tf.random.set_seed(seed)
+framework.set_seed(seed)
 
 host = args.host
 print(f'http://{host}:{port}/')
@@ -1612,7 +1605,7 @@ def autoplay():
         hash_integer = calculate_seed(deal_str)
         print(f"[Autoplay] Setting seed based on deal hash: {hash_integer}")
         np.random.seed(hash_integer)
-        tf.random.set_seed(hash_integer)
+        framework.set_seed(hash_integer)
 
         mp = models.matchpoint      
         if request.args.get("tournament"):

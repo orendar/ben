@@ -3,7 +3,6 @@ import time
 import math
 import os
 import numpy as np
-import tensorflow as tf
 
 import binary
 

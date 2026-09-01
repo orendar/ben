@@ -3,91 +3,68 @@ import os.path
 
 from configparser import ConfigParser
 
-# TensorFlow implementations
-from nn.player_tf2 import BatchPlayer as BatchPlayerTF
-from nn.bid_info_tf2 import BidInfo as BidInfoTF
-from nn.leader_tf2 import Leader as LeaderTF
-from nn.lead_singledummy_tf2 import LeadSingleDummy as LeadSingleDummyTF
-from nn.contract_tf2 import Contract as ContractTF
-from nn.bidder_tf2 import Bidder as BidderTF
-from nn.trick_tf2 import Trick as TrickTF
-
 from nn.model_path_provider import IsolatedModelPathProvider, find_best_temp_drive
 
-# ONNX modules are loaded lazily to avoid requiring onnxruntime when using TF models
-_onnx_modules = {}
+# Every backend is loaded lazily, so a `.pt` deployment never imports
+# TensorFlow and a `.keras` one never imports torch or onnxruntime.
+BACKENDS = {'.pt': 'torch', '.onnx': 'onnx', '.keras': 'tf2'}
+MODULES = {
+    'Leader': 'leader',
+    'BatchPlayer': 'player',
+    'BidInfo': 'bid_info',
+    'LeadSingleDummy': 'lead_singledummy',
+    'Contract': 'contract',
+    'Bidder': 'bidder',
+    'Trick': 'trick',
+}
+_classes = {}
 
-def _get_onnx_module(name):
-    """Lazy-load ONNX implementation modules on first use."""
-    if name not in _onnx_modules:
-        if name == 'Leader':
-            from nn.leader_onnx import Leader as cls
-        elif name == 'BatchPlayer':
-            from nn.player_onnx import BatchPlayer as cls
-        elif name == 'BidInfo':
-            from nn.bid_info_onnx import BidInfo as cls
-        elif name == 'LeadSingleDummy':
-            from nn.lead_singledummy_onnx import LeadSingleDummy as cls
-        elif name == 'Contract':
-            from nn.contract_onnx import Contract as cls
-        elif name == 'Bidder':
-            from nn.bidder_onnx import Bidder as cls
-        elif name == 'Trick':
-            from nn.trick_onnx import Trick as cls
-        else:
-            raise ValueError(f"Unknown ONNX module: {name}")
-        _onnx_modules[name] = cls
-    return _onnx_modules[name]
+
+def backend_of(model_path):
+    for suffix, backend in BACKENDS.items():
+        if model_path.endswith(suffix):
+            return backend
+    return 'tf2'
+
+
+def _get_class(name, model_path):
+    """Resolve e.g. ('Bidder', 'models/torch/x.pt') to nn.bidder_torch.Bidder."""
+    backend = backend_of(model_path)
+    if (name, backend) not in _classes:
+        if name not in MODULES:
+            raise ValueError(f"Unknown model wrapper: {name}")
+        module = __import__(f"nn.{MODULES[name]}_{backend}", fromlist=[name])
+        _classes[(name, backend)] = getattr(module, name)
+    return _classes[(name, backend)]
 
 
 # Auto-detection factory functions based on file extension
 def Leader(model_path):
-    """Auto-select Leader implementation based on file extension"""
-    if model_path.endswith('.onnx'):
-        return _get_onnx_module('Leader')(model_path)
-    return LeaderTF(model_path)
+    return _get_class('Leader', model_path)(model_path)
 
 
 def BatchPlayer(name, model_path):
-    """Auto-select BatchPlayer implementation based on file extension"""
-    if model_path.endswith('.onnx'):
-        return _get_onnx_module('BatchPlayer')(name, model_path)
-    return BatchPlayerTF(name, model_path)
+    return _get_class('BatchPlayer', model_path)(name, model_path)
 
 
 def BidInfo(model_path):
-    """Auto-select BidInfo implementation based on file extension"""
-    if model_path.endswith('.onnx'):
-        return _get_onnx_module('BidInfo')(model_path)
-    return BidInfoTF(model_path)
+    return _get_class('BidInfo', model_path)(model_path)
 
 
 def LeadSingleDummy(model_path):
-    """Auto-select LeadSingleDummy implementation based on file extension"""
-    if model_path.endswith('.onnx'):
-        return _get_onnx_module('LeadSingleDummy')(model_path)
-    return LeadSingleDummyTF(model_path)
+    return _get_class('LeadSingleDummy', model_path)(model_path)
 
 
 def Contract(model_path):
-    """Auto-select Contract implementation based on file extension"""
-    if model_path.endswith('.onnx'):
-        return _get_onnx_module('Contract')(model_path)
-    return ContractTF(model_path)
+    return _get_class('Contract', model_path)(model_path)
 
 
 def Bidder(name, model_path, alert_supported):
-    """Auto-select Bidder implementation based on file extension"""
-    if model_path.endswith('.onnx'):
-        return _get_onnx_module('Bidder')(name, model_path, alert_supported)
-    return BidderTF(name, model_path, alert_supported)
+    return _get_class('Bidder', model_path)(name, model_path, alert_supported)
 
 
 def Trick(model_path):
-    """Auto-select Trick implementation based on file extension"""
-    if model_path.endswith('.onnx'):
-        return _get_onnx_module('Trick')(model_path)
-    return TrickTF(model_path)
+    return _get_class('Trick', model_path)(model_path)
 
 class Models:
 

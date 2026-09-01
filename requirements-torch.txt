@@ -1,0 +1,22 @@
+# Runtime for the torch backend: no tensorflow, no keras, no onnxruntime.
+# Serve a config whose model paths end in .pt (src/config/*-torch.conf).
+# `scripts/convert_keras_to_torch.py` additionally needs h5py, but only to
+# produce the .pt files, and never runs on a serving box.
+
+numpy>=2.0.0,<2.1.0
+scipy>=1.14.0
+torch>=2.5
+
+absl-py
+tqdm
+websockets>=15.0.1
+
+bottle
+gevent
+pythonnet>=3.0.4
+bottle_session
+flask
+flask_cors
+flask_limiter
+psutil==5.9.0
+colorama
