@@ -1,8 +1,7 @@
 """Every converted model must reproduce Keras's answers.
 
-The references in `tests/fixtures/` were recorded from the `.keras` models by
-`scripts/make_parity_fixtures.py`, so this runs with neither TensorFlow nor the
-original models present.
+The references in `tests/fixtures/` are frozen recordings of the answers the
+trained weights shipped with; nothing in the repo regenerates them.
 """
 
 import os

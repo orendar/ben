@@ -1,9 +1,8 @@
 #!/bin/bash
 
 # this is all in one wrapper script mainly for container
-# Suppress TensorFlow CUDA/XLA warnings (no GPU in container)
-export TF_CPP_MIN_LOG_LEVEL=3
-export TF_ENABLE_ONEDNN_OPTS=0
+# No GPU in the container; torch runs the networks on CPU
+export BEN_TORCH_DEVICE=cpu
 
 python3 gameserver.py 2>&1 | grep -v "cuda\|cuDNN\|cuBLAS\|cuFFT\|cuInit\|CUDA\|absl::InitializeLog" & # listen on 4443 for websocket
 

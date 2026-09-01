@@ -3,7 +3,7 @@ rem ============================================================================
 rem  check_env.cmd  -  make release builds run in the conda 'ben' environment
 rem  ----------------------------------------------------------------------------
 rem  PyInstaller bundles must be frozen against the packages pinned in
-rem  ..\requirements.txt  (Python 3.12, numpy 2.x, tensorflow, PyInstaller).
+rem  ..\requirements.txt  (Python 3.12, numpy 2.x, torch, PyInstaller).
 rem  Freezing from a different interpreter gives a mixed numpy in the bundle and
 rem  the app crashes at startup with "CPU dispatcher tracer already initlized".
 rem
@@ -49,10 +49,10 @@ set "CONDA_DEFAULT_ENV=ben"
 set "PATH=%ben_PREFIX%;%ben_PREFIX%\Library\mingw-w64\bin;%ben_PREFIX%\Library\usr\bin;%ben_PREFIX%\Library\bin;%ben_PREFIX%\Scripts;%ben_PREFIX%\bin;%PATH%"
 
 :verify
-python -c "import numpy, PyInstaller, tensorflow" >nul 2>&1
+python -c "import numpy, PyInstaller, torch" >nul 2>&1
 if not errorlevel 1 goto :verify_ver
 echo.
-echo [check_env] ERROR: active Python is missing numpy / PyInstaller / tensorflow.
+echo [check_env] ERROR: active Python is missing numpy / PyInstaller / torch.
 echo             In the ben env run:  pip install -r ..\requirements.txt
 exit /b 1
 

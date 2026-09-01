@@ -165,7 +165,7 @@ class Models:
         self.trump_lead_penalty = trump_lead_penalty
 
     def warm_up(self):
-        """Run dummy predictions to trigger TensorFlow JIT compilation for player models."""
+        """Run dummy predictions so the first real one does not pay kernel selection."""
         import numpy as np
 
         # Only warm up player models - they have consistent 298-feature input

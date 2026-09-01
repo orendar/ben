@@ -2,7 +2,7 @@
 # runservers.sh - macOS/Linux equivalent of runservers.cmd.
 #
 # Launches the BEN app/API/game servers in the background (staggered, like the
-# Windows version's 10s gaps so TensorFlow model loads don't all hit at once),
+# Windows version's 10s gaps so model loads don't all hit at once),
 # each logging to ../logs/<name>.log. Uses the repo venv (../.venv) if present.
 #
 # Usage:

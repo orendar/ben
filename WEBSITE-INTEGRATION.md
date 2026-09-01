@@ -308,7 +308,7 @@ on the frontend. BEN only answers "given this state, what do I do next?".
 - **CORS preflight fails from the browser?** `flask_cors.CORS(app)` allows
   all origins — if something blocks, suspect an upstream proxy/CDN, not
   Flask.
-- **First request after container start is very slow.** TensorFlow + the
+- **First request after container start is very slow.** Torch + the
   models load lazily; the first `/bid` or `/play` takes 5–15s. Hit
   `/autoplay` once at deploy time to warm up.
 - **`/play` returns "No contract found".** `ctx` was empty or the auction

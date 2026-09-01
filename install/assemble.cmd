@@ -5,7 +5,7 @@ rem  assemble.cmd - freeze every BEN spec ONCE (timed), then assemble BENAll.
 rem  The BBA/BEN/MvsM assemble scripts only robocopy from dist\ (no rebuilds),
 rem  so every spec is built exactly once per BuildAll. Each freeze is wrapped by
 rem  the :build subroutine which prints wall-clock seconds so you can see which
-rem  step is slow (the TensorFlow exes dominate; Defender scanning their binaries
+rem  step is slow (the torch exes dominate; Defender scanning their binaries
 rem  is the usual culprit - exclude the env + build/dist dirs to speed it up).
 rem ============================================================================
 
