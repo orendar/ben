@@ -1374,9 +1374,14 @@ class Sample:
             valid_bidding_samples = np.sum(sorted_min_bid_scores_ol > self.bid_extend_play_threshold)
             if self.verbose:
                 print(f"Samples {bidding_states_ol[0].shape[0]} after checking lead. {valid_bidding_samples} possible samples. After validation: {bidding_states_ol[0].shape[0]}")
-            # We trust bidding more than opening lead
-            #if valid_bidding_samples > self.sample_hands_play / 5:
-            bidding_states, sorted_min_bid_scores, lead_scores = bidding_states_ol, sorted_min_bid_scores_ol, lead_scores_ol
+            # We trust bidding more than opening lead. Keep the unfiltered set
+            # when the lead filter rejects everything: an opponent whose leads
+            # this model does not predict would otherwise leave no sample at
+            # all, and the assert below turns that into a dead hand. Guarding on
+            # emptiness alone leaves every position that already returns a card
+            # bit-identical -- validate_play_until_now below guards the same way.
+            if bidding_states_ol[0].shape[0] > 0:
+                bidding_states, sorted_min_bid_scores, lead_scores = bidding_states_ol, sorted_min_bid_scores_ol, lead_scores_ol
         else:  
             lead_scores = -np.ones(bidding_states[0].shape[0], dtype=np.float32)
 
