@@ -365,6 +365,12 @@ class BotLead:
         while True:
             c = np.argmax(lead_softmax_copy[0])
             score = lead_softmax_copy[0][c]
+            # follow_suit zeroed every card not in hand, so an exhausted softmax
+            # is all zeros and argmax returns index 0 -- the spade ace. Stop here
+            # or min_opening_leads pads the list with a card we were never dealt,
+            # and it wins the simulation sort on a phantom double-dummy score.
+            if score <= 0:
+                break
             # Always take minimum the number from configuration
             if score < self.models.lead_threshold and len(candidates) >= self.models.min_opening_leads:
                 break
@@ -375,6 +381,12 @@ class BotLead:
         
         # Due to error in Keras (Using different versin, that the one used for training) we might get cards not in hand 
         # So we should probably check, and exit if we have a version conflict
+
+        # A softmax with no mass on any card we hold would otherwise leave no
+        # candidate at all; offer every legal lead and let the simulation rank
+        # them, rather than inventing a preference.
+        if not candidates:
+            candidates = np.flatnonzero(self.handplay[0] > 0).tolist()
 
         return candidates, lead_softmax
 
