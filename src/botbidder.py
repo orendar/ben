@@ -1111,7 +1111,11 @@ class BotBid:
             auction_np[:,i] = bidding.BID2ID[bid]
         if self.models.use_bba_rollout: 
             for i in range(hands_np.shape[0]):
-                bba_auction = self.bbabot.bid_hand(auction, hands_np_as_pbn[i])
+                try:
+                    bba_auction = self.bbabot.bid_hand(auction, hands_np_as_pbn[i])
+                except RuntimeError:
+                    # EPBot overruns its own buffers on some long contested auctions; the rest passes
+                    bba_auction = [*auction, 'PASS', 'PASS', 'PASS']
                 for j, bid in enumerate(bba_auction):
                     auction_np[i,j] = bidding.BID2ID[bid]
 
