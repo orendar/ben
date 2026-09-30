@@ -272,6 +272,9 @@ class BotBid:
             # we would like to have the same samples including pips for all calculations
             if self.models.double_dummy_calculator:
                 hands_np_as_pbn = self.translate_hands(hands_np, self.hand_str, sample_count)
+            # Candidates are scored on the same deals and their rollouts converge
+            # on the same contracts, so a quarter of the solves are exact repeats.
+            dd_memo = {}
             for candidate in candidates:
                 if self.verbose:
                     print(f"Bid: {candidate.bid.ljust(4)} {candidate.insta_score:.3f}")
@@ -285,7 +288,7 @@ class BotBid:
                 decl_tricks_softmax3 = None
                 
                 if self.models.double_dummy_calculator:
-                    contracts, decl_tricks_softmax1 = self.expected_tricks_dd(hands_np_as_pbn, auctions_np, candidate.bid)
+                    contracts, decl_tricks_softmax1 = self.expected_tricks_dd(hands_np_as_pbn, auctions_np, candidate.bid, dd_memo)
                     ev = self.expected_score(len(auction) % 4, contracts, decl_tricks_softmax1)
                     ev_scores[candidate.bid] = ev
                     decoded_tricks = np.argmax(decl_tricks_softmax1, axis=1)
@@ -1307,7 +1310,11 @@ class BotBid:
         decl_tricks_softmax = self.models.sd_model_no_lead.pred_fun(X_sd)
         return contracts, decl_tricks_softmax
 
-    def expected_tricks_dd(self, hands_np_as_pbn, auctions_np, bid = None):
+    def expected_tricks_dd(self, hands_np_as_pbn, auctions_np, bid = None, memo = None):
+        # memo: {(deal pbn, strain, leader): leader-side tricks}, shared by the
+        # candidates of one decision. DD values are exact, so reuse moves no bid.
+        if memo is None:
+            memo = {}
         n_samples = auctions_np.shape[0]
         assert len(hands_np_as_pbn) == n_samples
         decl_tricks_softmax = np.zeros((n_samples, 14), dtype=np.int32)
@@ -1337,10 +1344,13 @@ class BotBid:
         # Batch solve each group
         sum = 0
         for (strain, leader), indices in groups.items():
-            hands_pbn = [hands_np_as_pbn[i] for i in indices]
-            dd_solved = self.ddsolver.solve(strain, leader, [], hands_pbn, 1)
-            for j, i in enumerate(indices):
-                tricks = 13 - dd_solved["max"][j]
+            todo = [i for i in indices if (hands_np_as_pbn[i], strain, leader) not in memo]
+            if todo:
+                dd_solved = self.ddsolver.solve(strain, leader, [], [hands_np_as_pbn[i] for i in todo], 1)
+                for j, i in enumerate(todo):
+                    memo[(hands_np_as_pbn[i], strain, leader)] = dd_solved["max"][j]
+            for i in indices:
+                tricks = 13 - memo[(hands_np_as_pbn[i], strain, leader)]
                 sum += tricks
                 decl_tricks_softmax[i, tricks] = 1
 
