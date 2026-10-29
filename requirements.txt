@@ -6,6 +6,7 @@ scikit-learn
 pandas
 
 tqdm
+absl-py
 
 websockets>=15.0.1
 
