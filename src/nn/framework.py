@@ -2,13 +2,9 @@
 
 from importlib import metadata
 
-import torch
+from nn.torch_config import set_seed  # noqa: F401
 
 PACKAGES = ("torch", "numpy")
-
-
-def set_seed(seed):
-    torch.manual_seed(seed)
 
 
 def banner():

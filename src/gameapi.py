@@ -568,8 +568,6 @@ configuration = conf.load(configfile)
 
 from nn.models import Models
 
-models = Models.from_conf(configuration, config_path.replace(os.path.sep + "src",""), verbose)
-    
 print("Config:", configfile)
 if opponentfile != "":
     # Override with information from opponent file
@@ -842,7 +840,7 @@ def deployment_manifest():
     global _manifest
     if _manifest is None:
         import subprocess
-        import torch
+        from nn.torch_config import runtime
         from pimc import BGADLL_Native
         git = lambda *a: subprocess.run(['git', *a], capture_output=True, text=True).stdout
         lib_dir = os.path.dirname(os.path.abspath(BGADLL_Native._lib_path))
@@ -857,9 +855,8 @@ def deployment_manifest():
             'bgadll_sha256': _sha256(BGADLL_Native._lib_path),
             'libdds_sha256': _sha256(os.path.join(lib_dir, 'libdds.so')),
             'weights_sha256': hashlib.sha256(''.join(p + _sha256(p) for p in weights).encode()).hexdigest(),
-            'torch': torch.__version__,
+            **runtime(),
             'numpy': np.__version__,
-            'device': torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu',
             'pimc_wait': models.pimc_wait,
             'pimc_max_threads': models.pimc_max_threads,
             'pimc_max_playouts': models.pimc_max_playouts,
