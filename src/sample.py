@@ -72,6 +72,13 @@ def player_to_nesw_i(player_i, contract):
     decl_i = bidding.get_decl_i(contract)
     return (decl_i + player_i + 1) % 4
 
+def take_samples(states, index):
+    # np.array(states)[:, index], without copying every sample first.
+    if isinstance(states, np.ndarray):
+        return states[:, index]
+    return np.stack([state[index] for state in states])
+
+
 class Sample:
 
     def __init__(self, lead_accept_threshold, lead_accept_threshold_suit, lead_accept_threshold_honors, lead_accept_threshold_partner_trust, bidding_threshold_sampling, play_accept_threshold_opponents, play_accept_threshold_declarer, play_accept_threshold_partner, min_play_accept_threshold_samples, bid_accept_play_threshold, 
@@ -1286,14 +1293,12 @@ class Sample:
             samples = set()  # Use a set instead of a list for O(1) lookups
             unique_indices = np.ones(states[0].shape[0], dtype=bool)  # Assuming this is a NumPy boolean mask
 
+            # The tuple of four hands is also the key `counts` is read back by.
+            hands = [state[:, 0, :32].tobytes() for state in states]
+            width = 32 * states[0].itemsize
             for i in range(states[0].shape[0]):
-                # Use tobytes() for efficient hashing - avoids astype() which can cause issues in NumPy 2.0
-                sample = (
-                    states[0][i, 0, :32].tobytes(),
-                    states[1][i, 0, :32].tobytes(),
-                    states[2][i, 0, :32].tobytes(),
-                    states[3][i, 0, :32].tobytes()
-                )
+                a, b = i * width, (i + 1) * width
+                sample = (hands[0][a:b], hands[1][a:b], hands[2][a:b], hands[3][a:b])
                 if sample in samples:
                     unique_indices[i] = False
                 else:
@@ -1317,7 +1322,7 @@ class Sample:
             if np.sum(accept) < n_samples:
                 accept = np.ones_like(accept).astype(bool)
 
-            states = np.array(states)[:, accept]
+            states = take_samples(states, accept)
 
         else:
             c_hcp, c_shp = None, None
@@ -1352,7 +1357,7 @@ class Sample:
 
         sorted_min_bid_scores = min_bid_scores[sorted_indices]
         # Sort second dimension within each array in states based on min_bid_scores
-        bidding_states = np.array(states)[:, sorted_indices]
+        bidding_states = take_samples(states, sorted_indices)
 
         #print(bidding_states[0].shape[0])
         valid_bidding_samples_good = np.sum(sorted_min_bid_scores > self.bidding_threshold_sampling)
@@ -1361,7 +1366,7 @@ class Sample:
         if bidding_states[0].shape[0] > 2 * self.sample_hands_play and valid_bidding_samples_good > 10:
             # We drop the samples we are not going to use
             mask = sorted_min_bid_scores > self.bid_extend_play_threshold/2
-            bidding_states = np.array(bidding_states)[:, mask]
+            bidding_states = take_samples(bidding_states, mask)
             sorted_min_bid_scores = sorted_min_bid_scores[mask]
         assert bidding_states[0].shape[0] > 0, "No samples after checking bidding"
 
@@ -1436,7 +1441,7 @@ class Sample:
             if valid_bidding_samples >= self.sample_hands_play: 
                 #if self.verbose:
                 valid_mask = sorted_min_bid_scores > self.bidding_threshold_sampling    
-                bidding_states = np.array(bidding_states)[:, valid_mask]
+                bidding_states = take_samples(bidding_states, valid_mask)
 
                 lead_scores = lead_scores[valid_mask]
                 play_scores = play_scores[valid_mask]
@@ -1462,7 +1467,7 @@ class Sample:
                     replace=False,                          # No replacement (a permutation)
                     p=combined_probabilities                # Probabilities for weighted randomness
                 )
-                bidding_states = np.array(bidding_states)[:, random_indices]
+                bidding_states = take_samples(bidding_states, random_indices)
                 sorted_min_bid_scores = sorted_min_bid_scores[random_indices]
                 lead_scores = lead_scores[random_indices]
                 play_scores = play_scores[random_indices]
@@ -1494,7 +1499,7 @@ class Sample:
                             # Find the first 200 `True` values and set all others to `False`
                             valid_mask[valid_mask.cumsum() > 200] = False
 
-                        bidding_states = np.array(bidding_states)[:, valid_mask]
+                        bidding_states = take_samples(bidding_states, valid_mask)
 
                         lead_scores = lead_scores[valid_mask]
                         play_scores = play_scores[valid_mask]
@@ -1673,7 +1678,7 @@ class Sample:
                 # If we did not find 2 samples we ignore the test for opening lead
                 if np.sum(lead_scores_unfiltered >= lead_accept_threshold) > 1:
                     mask = lead_scores_unfiltered > lead_accept_threshold
-                    states = np.array(states)[:, mask]
+                    states = take_samples(states, mask)
                     bid_scores = bid_scores[mask]
                     lead_scores = lead_scores_unfiltered[mask]
                 else:
@@ -1805,7 +1810,7 @@ class Sample:
             #print(f"play_accept_threshold {play_accept_threshold:0.3f} reduced")
         
         s_accepted = min_play_scores > play_accept_threshold
-        states = np.array(states)[:, s_accepted]
+        states = take_samples(states, s_accepted)
         lead_scores = lead_scores[s_accepted]
         bidding_scores = bidding_scores[s_accepted]
         min_play_scores = min_play_scores[s_accepted]

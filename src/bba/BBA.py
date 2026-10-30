@@ -287,6 +287,10 @@ def _str_array(lst):
     return lst
 
 
+# Configured EPBot handles free for reuse: configuring four costs ~4% of a server's CPU.
+_CONFIGURED = {}
+
+
 class BBABotBid: 
 
     _dll_loaded = None  # Class-level attribute to store the DLL singleton
@@ -359,12 +363,19 @@ class BBABotBid:
         self.hash_integer = calculate_seed(hand)         
         self.rng = self.get_random_generator()
 
+        self.dealer = dealer
+        self.position = position
+        self._pool_key = (our_system_file, their_system_file, scoring_matchpoint, bool(verbose))
+        pooled = _CONFIGURED.get(self._pool_key)
+        if pooled:
+            self.players, self.our_conventions, self.their_conventions, self.our_system, self.their_system = pooled.pop()
+            self.vuln_wethey = [self.vuln_nsew[1], self.vuln_nsew[0]]
+            return
+
         # Initialize 4 players
         self.players = [EPBot() for _ in range(4)]
         if self.verbose:
             print(f"BBA Version (DLL): {self.players[0].version()}")
-        self.dealer = dealer
-        self.position = position
 
         self.our_conventions, self.their_conventions = self.load_ccs()
         # Position is always N=0, E=1, S=2, W=3
@@ -402,6 +413,12 @@ class BBABotBid:
                 self.players[position].scoring = self.SCORING_MATCH_POINTS
             else:
                 self.players[position].scoring = self.SCORING_IMP
+
+    def __del__(self):
+        key = getattr(self, "_pool_key", None)
+        if key is not None and hasattr(self, "their_conventions"):
+            _CONFIGURED.setdefault(key, []).append(
+                (self.players, self.our_conventions, self.their_conventions, self.our_system, self.their_system))
 
     def version(self):
         dll = BBABotBid.get_dll()  # Retrieve the loaded DLL classes through the singleton
