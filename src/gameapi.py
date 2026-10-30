@@ -3,6 +3,8 @@ faulthandler.enable()
 from gevent import monkey
 monkey.patch_all()
 import gc
+import hashlib
+import pathlib
 import os
 import sys
 import platform
@@ -822,6 +824,52 @@ def log_response_info(response):
         return response
     logger.info(f"Response body: {response.status} {response.get_data()}")
     return response
+
+
+_manifest = None
+
+
+def _sha256(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for block in iter(lambda: f.read(1 << 20), b''):
+            h.update(block)
+    return h.hexdigest()
+
+
+def deployment_manifest():
+    # What this server is, for pairing and caching: the bidding canaries cannot see card play.
+    global _manifest
+    if _manifest is None:
+        import subprocess
+        import torch
+        from pimc import BGADLL_Native
+        git = lambda *a: subprocess.run(['git', *a], capture_output=True, text=True).stdout
+        lib_dir = os.path.dirname(os.path.abspath(BGADLL_Native._lib_path))
+        weights = sorted(str(p) for p in pathlib.Path(configfile).resolve().parents[2].glob('models/torch/**/*.pt'))
+        if not weights:
+            raise RuntimeError('no weights found for the deployment manifest')
+        _manifest = {
+            'commit': git('rev-parse', 'HEAD').strip(),
+            'diff_sha256': hashlib.sha256(git('diff', 'HEAD', '--', '.', ':!logs').encode()).hexdigest(),
+            'config': os.path.basename(configfile),
+            'config_sha256': _sha256(configfile),
+            'bgadll_sha256': _sha256(BGADLL_Native._lib_path),
+            'libdds_sha256': _sha256(os.path.join(lib_dir, 'libdds.so')),
+            'weights_sha256': hashlib.sha256(''.join(p + _sha256(p) for p in weights).encode()).hexdigest(),
+            'torch': torch.__version__,
+            'numpy': np.__version__,
+            'device': torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu',
+            'pimc_wait': models.pimc_wait,
+            'pimc_max_threads': models.pimc_max_threads,
+            'pimc_max_playouts': models.pimc_max_playouts,
+        }
+    return _manifest
+
+
+@app.route('/manifest')
+def manifest():
+    return json.dumps(deployment_manifest())
 
 
 @app.route('/')
