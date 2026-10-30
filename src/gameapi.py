@@ -4,6 +4,7 @@ from gevent import monkey
 monkey.patch_all()
 import gc
 import hashlib
+import random as stdlib_random
 import pathlib
 import os
 import sys
@@ -874,9 +875,17 @@ def home():
     html = '<h1><a href="/">Play Now</a></h1>\n'
     return html
 
+def seed_from_query():
+    # The claim check draws from the global generators: without this an answer depends on the requests before it.
+    seed = calculate_seed(request.query_string.decode())
+    stdlib_random.seed(seed)
+    np.random.seed(seed)
+
+
 @app.route('/bid')
 def bid():
     try:
+        seed_from_query()
         t_start = time.time()
         if request.args.get("dealno"):
             dealno = request.args.get("dealno")
@@ -968,6 +977,7 @@ def bid():
 @app.route('/lead')
 def lead():
     try:
+        seed_from_query()
         t_start = time.time()
         if request.args.get("dealno"):
             dealno = request.args.get("dealno")
@@ -1048,6 +1058,7 @@ def lead():
 @limiter.limit("10000/hour;100/minute", exempt_when=is_internal_request)
 def play():
     try:
+        seed_from_query()
         t_start = time.time()
         if request.args.get("dealno"):
             dealno = request.args.get("dealno")

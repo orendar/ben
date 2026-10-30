@@ -339,8 +339,10 @@ class Sample:
         # vectorize has an overhead
         if (ak_out_i.shape[1] != 0):
             # print(ak_out_i.shape[1])
-            ak_out_i = np.vectorize(rng.permutation, signature='(n)->(n)')(ak_out_i)
-        small_out_i = np.vectorize(rng.permutation, signature='(n)->(n)')(small_out_i)
+            for row in ak_out_i:
+                rng.shuffle(row)
+        for row in small_out_i:
+            rng.shuffle(row)
 
         s_all = np.arange(generate_samples)
 
@@ -903,10 +905,12 @@ class Sample:
         # Fill all samples with the missing AK
         ak_out_i[:, :] = np.array(ak_cards)
         # Shuffle AK in all samples
-        ak_out_i = np.vectorize(lambda x: rng.permutation(np.copy(x)), signature='(n)->(n)')(ak_out_i)
+        for row in ak_out_i:
+            rng.shuffle(row)
         small_out_i = np.zeros((n_samples, len(small_cards)), dtype=int)
         small_out_i[:, :] = np.array(small_cards)
-        small_out_i = np.vectorize(lambda x: rng.permutation(np.copy(x)), signature='(n)->(n)')(small_out_i)
+        for row in small_out_i:
+            rng.shuffle(row)
 
 
         s_all = np.arange(n_samples)
@@ -984,10 +988,14 @@ class Sample:
             lead_type = "NT" if strain == 0 else "Suit"
             explanations = set()
             # We should probably ignore the lead if we know how the suit is divided
-            for ix, hand in enumerate(handsamples):
-                suit = opening_lead52 // 13
-                hand_str = deck52.suit32to52str(hand[suit * cards_in_suit: (suit + 1) * cards_in_suit])
-                valid, explanation = validate_lead(hand_str, opening_lead, lead_type, self.verbose)
+            suit = opening_lead52 // 13
+            suit_rows = handsamples[:, suit * cards_in_suit: (suit + 1) * cards_in_suit]
+            verdicts = {}
+            for ix, row in enumerate(suit_rows):
+                key = row.tobytes()
+                if key not in verdicts:
+                    verdicts[key] = validate_lead(deck52.suit32to52str(row), opening_lead, lead_type, self.verbose)
+                valid, explanation = verdicts[key]
                 #print(hand_str, opening_lead, lead_type, valid, explanation)
 
                 if self.verbose and not valid:
@@ -1044,10 +1052,7 @@ class Sample:
 
         # convert the deck if different for play and bidding
         if models.n_cards_play != models.n_cards_bidding:
-            handbidding = np.zeros((handsamples.shape[0], models.n_cards_bidding))
-            parse_hand = binary.parse_hand_f(models.n_cards_bidding)
-            for i in range(handsamples.shape[0]):
-                handbidding[i] = parse_hand(deck52.handxxto52str(handsamples[i], models.n_cards_play))
+            handbidding = deck52.convert_deck(handsamples, models.n_cards_play, models.n_cards_bidding, binary.get_card_index)
 
         A = binary.get_auction_binary_sampling(n_steps, auction, lead_index, handbidding, vuln, models, models.n_cards_bidding)
 
@@ -1089,10 +1094,7 @@ class Sample:
 
         # convert the deck if different for play and bidding
         if models.n_cards_play != models.n_cards_bidding:
-            handbidding = np.zeros((sample_hands.shape[0], models.n_cards_bidding))
-            parse_hand = binary.parse_hand_f(models.n_cards_bidding)
-            for i in range(sample_hands.shape[0]):
-                handbidding[i] = parse_hand(deck52.handxxto52str(sample_hands[i], models.n_cards_play))
+            handbidding = deck52.convert_deck(sample_hands, models.n_cards_play, models.n_cards_bidding, binary.get_card_index)
         else:
             handbidding = sample_hands
 

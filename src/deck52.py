@@ -121,16 +121,26 @@ def suit32to52str(suit32):
 def handxxto52str(handxx, n_cards=32):
     full_symbols = 'AKQJT98765432'
     assert handxx.size == 4 * (n_cards // 4), f"Unexpected handxx size: {handxx.shape}"
-    x = handxx.reshape((4, n_cards // 4))
-    
-    suits = [
-        ''.join(
-            full_symbols[j] if x[i, j] > 0 else ''
-            for j in range(n_cards // 4 - 1)
-        ) + 'x' * int(x[i, n_cards // 4 - 1])
-        for i in range(4)
-    ]
+    # tolist: numpy scalar access is most of this function's cost, per sampled hand
+    x = handxx.ravel().tolist()
+    k = n_cards // 4
+    suits = []
+    for i in range(4):
+        row = x[i * k:(i + 1) * k]
+        suits.append(''.join([full_symbols[j] for j in range(k - 1) if row[j] > 0]) + 'x' * int(row[k - 1]))
     return '.'.join(suits)
+
+
+def convert_deck(hands, n_from, n_to, card_index):
+    """binary.parse_hand_f(n_to)(handxxto52str(h, n_from)) for every row of `hands`."""
+    k_from, k_to = n_from // 4, n_to // 4
+    x = hands.reshape((hands.shape[0], 4, k_from))
+    out = np.zeros((hands.shape[0], 4, k_to), dtype=np.float64)
+    for j, symbol in enumerate('AKQJT98765432'[:k_from - 1]):
+        out[:, :, card_index(symbol, n_to)] += x[:, :, j] > 0
+    out[:, :, card_index('x', n_to)] += np.trunc(x[:, :, k_from - 1])
+    return out.reshape((hands.shape[0], n_to))
+
 
 def reorder_hand(hands_string):
     # Define the order of the cards
