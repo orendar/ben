@@ -821,12 +821,6 @@ def log_response_info(response):
     if response.status == 444:  # SilentAbort code, ignore status
         return response
     logger.info(f"Response body: {response.status} {response.get_data()}")
-    # Get system memory info
-    np.empty(0) 
-    gc.collect()  # Force garbage collection
-    virtual_memory = psutil.virtual_memory()
-    available_memory = virtual_memory.available / (1024 ** 2)  # Convert bytes to MB
-    print(f"Available memory after request: {available_memory:.2f} MB")
     return response
 
 

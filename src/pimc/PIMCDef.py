@@ -548,7 +548,10 @@ class BGADefDLL:
             print('Error AwaitEvaluation:', ex)
             sys.exit(1)
         # Allow running threads to finalize
-        time.sleep(0.05)
+        # A cutoff makes the answer depend on the clock; every other PIMC decision is reproducible.
+        if time.time() - start_time >= self.wait:
+            time.sleep(0.05)
+            print(f"PIMC_WAIT_HIT {time.time() - start_time:.3f}", flush=True)
         if self.verbose:    
             print("max_playout",self.max_playout)
             print(f"Playouts: {self.pimc.Playouts}")
