@@ -88,7 +88,7 @@ def last_contract(auction):
     return None
 
 def get_level(bid):
-    if bid =="P" or bid =="X" or bid == "XX":
+    if bid in ("P", "PASS", "X", "XX"):
         return 0
     return int(bid[0])
 
