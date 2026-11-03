@@ -1,3 +1,11 @@
+# PyInstaller: a frozen build has no python.exe and no suitc_worker.py on disk,
+# so SuitC re-launches *this* exe as its worker (`--suitc-worker <libpath>`).
+# Handle that argv first — before the heavy imports and before argparse, which
+# would otherwise reject the worker argv with "required: --name, --seat".
+import sys
+from suitc.suitc_worker import freeze_support as _suitc_freeze_support
+_suitc_freeze_support()
+
 import faulthandler
 faulthandler.enable()
 from gevent import monkey
@@ -35,8 +43,11 @@ absl.logging.set_stderrthreshold(absl.logging.FATAL)
 
 from nn import framework
 import psutil
+import healthlog
 
 from gevent.pywsgi import WSGIServer
+import gevent
+import signal
 import datetime 
 import time
 
@@ -68,9 +79,10 @@ try:
 except ImportError:
     ACEDefDLL = None
 
-from flask import Flask, Response, request, jsonify, abort
+from flask import Flask, Response, request, jsonify, abort, g
 from flask_cors import CORS
 from werkzeug.exceptions import HTTPException
+import ipaddress
 import json
 import logging
 from logging.handlers import TimedRotatingFileHandler
@@ -85,6 +97,8 @@ warnings.filterwarnings("ignore")
 logging.getLogger().setLevel(logging.CRITICAL)
 # Just disables the warnings
 from nn.opponents import Opponents
+from systems import Systems, UnknownName
+import copy
 
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address # Default key function (limits by IP)
@@ -92,6 +106,7 @@ from flask_limiter.util import get_remote_address # Default key function (limits
 import pprint
 import argparse
 import conf
+from ddsolver.ddsrecorder import DDSRecorder
 import numpy as np
 from sample import Sample
 from util import get_play_status, get_singleton, get_possible_cards, calculate_seed
@@ -100,7 +115,7 @@ from claim import Claimer
 dealer_enum = {'N': 0, 'E': 1, 'S': 2, 'W': 3}
 from colorama import Fore, Back, Style, init
 
-version = '0.8.8.4'
+version = '0.9.0.2'
 init()
 
 def handle_exception(e):
@@ -240,7 +255,7 @@ def play_api(dealer_i, vuln_ns, vuln_ew, hands, models, sampler, contract, strai
                         strain_i=strain_i,
                         player_i=player_i,
                         hands52=[card_player.hand52 for card_player in card_players],
-                        n_samples=1,
+                        n_samples=200,
                         hidden_cards=deck,
                         current_trick=current_trick52
                     )
@@ -437,6 +452,12 @@ def str_to_bool(value):
         return False
     raise ValueError("Invalid boolean value")
 
+# Query parameters arrive as strings, so `if request.args.get("details")` is true
+# for details=false too. Only an explicit true value counts; absent means False.
+def query_flag(name):
+    value = request.args.get(name)
+    return value is not None and value.strip().lower() in ['true', '1', 't', 'y', 'yes']
+
 
 def create_auction(bids, dealer_i):
     # Convert various bid notations to standard format:
@@ -513,6 +534,23 @@ def parse_vuln(v):
     vuln_ew = v_upper in ['EW', 'E-W', 'BOTH', 'ALL']
     return [vuln_ns, vuln_ew]
 
+def parse_matchtype(args):
+    """
+    Read the scoring from the request: True for matchpoints, False for IMPs,
+    None when the request does not say.
+
+    `matchtype` is the Seat Robot API's name for it; `tournament` is the name
+    BEN has always read and `scoring` is Lia's, and both are still accepted.
+    When more than one is given, `matchtype` wins.
+
+    Matchpoints: MP, matchpoint, matchpoints, pairs (case-insensitive).
+    Anything else is IMPs.
+    """
+    value = args.get("matchtype") or args.get("tournament") or args.get("scoring")
+    if not value:
+        return None
+    return value.strip().lower() in ['mp', 'matchpoint', 'matchpoints', 'pairs']
+
 random = True
 # For some strange reason parameters parsed to the handler must be an array
 board_no = []
@@ -533,8 +571,12 @@ parser.add_argument("--seed", type=int, default=42, help="Seed for random")
 parser.add_argument("--matchpoint", type=str_to_bool, default=None, help="Playing match point")
 parser.add_argument("--nolimit", type=str_to_bool, default=False, help="Removed limit on number of requests to the API")
 parser.add_argument("--allowed-hosts", type=str, default=None, help="Comma-separated list of allowed Host header values (e.g. 'localhost,ben,myhost.example.com'). Default: localhost,127.0.0.1. Use '*' to allow all hosts.")
+parser.add_argument("--ddsrecord", default=None, help="Record every DDS call to this file for later benchmarking with ddsreplay.py (.gz compresses; a directory gets one file per process). Records are not tagged with a board here - requests are served concurrently.")
 
 args = parser.parse_args()
+
+# Before any DDSolver is built, so nothing is missed.
+DDSRecorder.configure(args.ddsrecord)
 
 configfile = args.config
 opponentfile = args.opponent
@@ -577,7 +619,8 @@ if opponentfile != "":
     opponents = Opponents.from_conf(configuration, config_path.replace(os.path.sep + "src",""))
     sys.stderr.write(f"Expecting opponent: {opponents.name}\n")
 
-models = Models.from_conf(configuration, config_path.replace(os.path.sep + "src",""))
+# Loaded once, after the opponent file has been merged into the configuration
+models = Models.from_conf(configuration, config_path.replace(os.path.sep + "src",""), verbose)
 
 # Enable model timing for performance analysis
 ModelTimer.enabled = True
@@ -599,6 +642,24 @@ if models.matchpoint:
     print("Matchpoint mode on")
 else:
     print("Playing IMPS mode")
+
+# The systems a request may ask for (ourSystem/theirSystem/ourCarding/theirCarding)
+systems_file = os.path.join(config_path, "config", "systems.conf")
+if os.path.isfile(systems_file):
+    systems = Systems.load(systems_file, configuration, models, config_path.replace(os.path.sep + "src",""), verbose)
+    print("Systems: ", ", ".join(systems.capabilities()["readsSystems"]))
+else:
+    systems = None
+    print(f"No {systems_file}, so requests cannot choose a system")
+
+def request_models():
+    """The shared models with this request's scoring, systems and carding applied
+    to a copy, so one request cannot change what another one plays."""
+    this_request = systems.for_request(models, request.args) if systems else copy.copy(models)
+    requested_mp = parse_matchtype(request.args)
+    if requested_mp is not None:
+        this_request.matchpoint = requested_mp
+    return this_request
 
 if models.use_bba or models.use_bba_to_count_aces or models.consult_bba or models.use_bba_rollout:
     from bba.BBA import BBABotBid
@@ -663,24 +724,24 @@ def is_internal_request():
     """Exempt internal requests from rate limiting (localhost and private networks)"""
     from flask import request
     remote_addr = request.remote_addr or ''
-    # Exempt localhost (IPv4 and IPv6)
-    if remote_addr in ('127.0.0.1', '::1', 'localhost'):
+    if remote_addr == 'localhost':
         return True
-    # Exempt private network ranges (RFC 1918)
-    if remote_addr.startswith('192.168.') or \
-       remote_addr.startswith('10.') or \
-       remote_addr.startswith('172.16.') or \
-       remote_addr.startswith('172.17.'):  # Docker default bridge
-        return True
-    return False
+    try:
+        addr = ipaddress.ip_address(remote_addr)
+    except ValueError:
+        return False
+    # is_private covers 10/8, 192.168/16 and all of 172.16/12 - so any Docker
+    # network, not just the default bridge; is_loopback covers 127.0.0.1 and ::1.
+    return addr.is_loopback or addr.is_private
 
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,  # Limits based on the remote IP address
     default_limits=["20000 per day", "5000 per hour", "100 per minute"],
     # --nolimit true disables rate limiting entirely: benchmark clients drive
-    # /bid far past 100/minute, and these default limits apply to EVERY route
-    # without the is_internal_request exemption that /play and /bids get.
+    # /bid far past 100/minute. Without it, /play and /bids name the exemption
+    # themselves and this covers /bid and /lead on loopback.
+    default_limits_exempt_when=is_internal_request,
     enabled=not nolimit
     # storage_uri="memory://" # Default, suitable for single-process test server.
                                # For production with multiple workers, use Redis or Memcached:
@@ -705,30 +766,53 @@ class PrefixedTimedRotatingFileHandler(TimedRotatingFileHandler):
         self.baseFilename = self.get_filename()
         self.mode = 'a'
         self.stream = self._open()
+        self.rolloverAt = self.computeRollover(int(time.time()))
+
 
 def get_random_generator(hand):
     hash_integer  = calculate_seed(hand)         
     return np.random.default_rng(hash_integer)
 
+def deal_problem(hand_str, dummy_str, cards):
+    # Why the hand, dummy and played cards cannot be one deal, or None. Checked before
+    # anything reaches DDS, which rejects a duplicated card with an error the caller
+    # would only see as a failed solve.
+    holder = {}
+    for who, hand in (("hand", hand_str), ("dummy", dummy_str)):
+        suits = hand.split('.')
+        if len(suits) != 4:
+            return f"{who} {hand} should have 4 suits"
+        for suit, holding in zip("SHDC", suits):
+            for rank in holding.upper():
+                card = suit + rank
+                if card in holder:
+                    where = f"twice in {who}" if holder[card] == who else f"in both {holder[card]} and {who}"
+                    return f"{card} is {where}"
+                holder[card] = who
+    upper = [card.upper() for card in cards]
+    for card in set(upper):
+        if upper.count(card) > 1:
+            return f"{card} is played twice"
+    return None
+
 def replace_x(input_str, rng, dummy, cards, n_cards):
+    # The highest spot card the 'x' stands for: 7 with 32 cards (A-8 shown), 9 with 24 (A-T)
+    top_spot = 15 - (n_cards // 4)
     # Function to replace 'x' in a section with unique digits
     def replace_in_section(suit, section, dummy, cards):
-        digits_used = set()  # To keep track of used digits in this section
-        for cards in cards:
-            if cards[0] == "SHDC"[suit]:
-                if cards[1].isdigit():
-                    digits_used.add(str(cards[1]))
-        for char in dummy:  
-            if char.isdigit():
-                digits_used.add(char)
+        # Spots already placed: played to a trick, in dummy, or named in this hand
+        digits_used = set(char for char in section + dummy if char.isdigit())
+        for card in cards:
+            if card[0] == "SHDC"[suit] and card[1].isdigit():
+                digits_used.add(card[1])
+        free = [str(d) for d in range(2, top_spot + 1) if str(d) not in digits_used]
         result = []
         for char in section:
             if char == 'X':
-                # Generate a unique digit not already used in this section
-                digit = None
-                while digit is None or digit in digits_used:
-                    digit = str(rng.integers(2, 15 - (n_cards // 4)))  # Random digit as string
-                digits_used.add(digit)  # Mark the digit as used
+                if not free:
+                    raise ValueError(f"No spot card left for the x in {'SHDC'[suit]} {section}")
+                # A random spot not already used in this suit
+                digit = free.pop(int(rng.integers(0, len(free))))
                 result.append(digit)
             else:
                 result.append(char)
@@ -756,6 +840,9 @@ logger = logging.getLogger(__name__)
 logger.addHandler(log_handler)
 logger.setLevel(logging.INFO)
 logger.propagate = False  # Prevent log messages from going to the root logger
+
+# Request timing, memory and hang reports in logs/gameapi-<host>-<port>-health-<date>.log
+healthlog.start(f"logs/gameapi-{host}-{port}")
 
 # Allowed hosts validation.
 # Requests with a Host header not in this set are rejected with HTTP 444 (silent drop).
@@ -824,6 +911,65 @@ def log_response_info(response):
     logger.info(f"Response body: {response.status} {response.get_data()}")
     return response
 
+# Graceful stop for containers. As PID 1 in a container Python ignores SIGTERM, so
+# `docker stop` waited and then killed the process, losing any request in progress.
+# Now SIGTERM closes the listening socket, the requests in progress finish (at most
+# BEN_STOP_GRACE_SECONDS), and the process exits. Idea from grand-slam-bridge (PR #199).
+STOP_GRACE_SECONDS = float(os.getenv('BEN_STOP_GRACE_SECONDS', '25'))
+requests_in_flight = 0
+stopping = False
+
+@app.before_request
+def count_request_in():
+    global requests_in_flight
+    g.counted_in_flight = True
+    requests_in_flight += 1
+    g.health_id = healthlog.request_started(request.method, request.url)
+
+@app.after_request
+def keep_status_for_health_log(response):
+    g.health_status = response.status_code
+    return response
+
+@app.teardown_request
+def count_request_out(exc=None):
+    global requests_in_flight
+    if g.pop('counted_in_flight', False):
+        requests_in_flight -= 1
+    if 'health_id' in g:
+        status = g.pop('health_status', None) or ('error' if exc else None)
+        line = healthlog.request_finished(g.pop('health_id'), status)
+        if line:
+            logger.info(line)
+
+@app.after_request
+def close_connection_when_stopping(response):
+    # A kept-alive connection would otherwise bring the client back to this process
+    if stopping:
+        response.headers['Connection'] = 'close'
+    return response
+
+def stop_taking_requests(http_server):
+    global stopping
+    if not stopping:
+        stopping = True
+        print(f"Stop signal: no new connections, waiting for {requests_in_flight} request(s) in progress", flush=True)
+        http_server.close()  # serve_forever() returns
+
+def wait_for_requests_in_flight():
+    deadline = time.time() + STOP_GRACE_SECONDS
+    idle_since = None
+    # A request accepted just before the signal may not be counted yet, so require 0.5 s idle
+    while time.time() < deadline:
+        if requests_in_flight > 0:
+            idle_since = None
+        elif idle_since is None:
+            idle_since = time.time()
+        elif time.time() - idle_since >= 0.5:
+            break
+        gevent.sleep(0.05)
+    print(f"Stopped with {requests_in_flight} request(s) in progress", flush=True)
+
 
 _manifest = None
 
@@ -872,8 +1018,15 @@ def manifest():
 
 @app.route('/')
 def home():
-    html = '<h1><a href="/">Play Now</a></h1>\n'
-    return html
+    # Seat Robot API: the names this server accepts in ourSystem/theirSystem/ourCarding/theirCarding
+    result = {"name": models.name}
+    if systems:
+        result.update(systems.capabilities())
+    return jsonify(result)
+
+@app.errorhandler(UnknownName)
+def unknown_name_handler(e):
+    return jsonify(error=str(e)), 400
 
 def seed_from_query():
     # The claim check draws from the global generators: without this an answer depends on the requests before it.
@@ -887,16 +1040,15 @@ def bid():
     try:
         seed_from_query()
         t_start = time.time()
-        if request.args.get("dealno"):
-            dealno = request.args.get("dealno")
+        if request.args.get("dealno") or request.args.get("board"):
+            dealno = request.args.get("dealno") or request.args.get("board")
             dealno = "{}-{}".format(dealno, datetime.datetime.now().strftime("%Y-%m-%d"))    
         else:
             dealno = "-{}".format(datetime.datetime.now().strftime("%Y-%m-%d"))  
-        mp = models.matchpoint      
-        if request.args.get("tournament"):
-            mp = request.args.get("tournament").lower() == "mp"
-            models.matchpoint = mp
-        details = request.args.get("details")
+        # This request's scoring, systems and carding, on a copy of the shared models
+        models = request_models()
+        mp = models.matchpoint
+        details = query_flag("details")
         # First we extract our hand
         hand = request.args.get("hand").replace('_','.').upper()
         if 'X' in hand:
@@ -979,18 +1131,17 @@ def lead():
     try:
         seed_from_query()
         t_start = time.time()
-        if request.args.get("dealno"):
-            dealno = request.args.get("dealno")
+        if request.args.get("dealno") or request.args.get("board"):
+            dealno = request.args.get("dealno") or request.args.get("board")
             dealno = "{}-{}".format(dealno, datetime.datetime.now().strftime("%Y-%m-%d"))    
         else:
             dealno = "-{}".format(datetime.datetime.now().strftime("%Y-%m-%d"))   
-        mp = models.matchpoint     
-        if request.args.get("tournament"):
-            mp = request.args.get("tournament").lower() == "mp"
-            models.matchpoint = mp
+        # This request's scoring, systems and carding, on a copy of the shared models
+        models = request_models()
+        mp = models.matchpoint
         # First we extract our hand and seat
         hand = request.args.get("hand").replace('_','.').upper()
-        details = request.args.get("details")
+        details = query_flag("details")
         if 'X' in hand:
             if '8' in hand or '9' in hand:
                 hand = replace_x(hand,get_random_generator(hand), "...", [], models.n_cards_play)
@@ -1060,20 +1211,19 @@ def play():
     try:
         seed_from_query()
         t_start = time.time()
-        if request.args.get("dealno"):
-            dealno = request.args.get("dealno")
+        if request.args.get("dealno") or request.args.get("board"):
+            dealno = request.args.get("dealno") or request.args.get("board")
             dealno = "{}-{}".format(dealno, datetime.datetime.now().strftime("%Y-%m-%d"))    
         else:
             dealno = "-{}".format(datetime.datetime.now().strftime("%Y-%m-%d"))        
+        # This request's scoring, systems and carding, on a copy of the shared models
+        models = request_models()
         mp = models.matchpoint
-        if request.args.get("tournament"):
-            mp = request.args.get("tournament").lower() == "mp"
-            models.matchpoint = mp
         # First we extract the hands and seat
         hand_str = request.args.get("hand").replace('_','.')
         dummy_str = request.args.get("dummy").replace('_','.')
         played = request.args.get("played")
-        details = request.args.get("details")
+        details = query_flag("details")
         cards = [played[i:i+2] for i in range(0, len(played), 2)]
         #print(played)
         #print(cards, len(cards))
@@ -1106,6 +1256,12 @@ def play():
             result = {"message":"Hand should have 13 cards"}
             print(result)
             return json.dumps(result)
+
+        problem = deal_problem(hand_str, dummy_str, cards)
+        if problem:
+            result = {"error": f"Not a possible deal: {problem}"}
+            print(result)
+            return json.dumps(result), 400
 
         seat = request.args.get("seat")
         # Vulnerability (absolute format: None, NS, EW, All/Both)
@@ -1309,10 +1465,9 @@ def explain():
     # Vulnerability (absolute format: None, NS, EW, All/Both)
     v = request.args.get("vul")
     vuln = parse_vuln(v)
+    # This request's scoring, systems and carding, on a copy of the shared models
+    models = request_models()
     mp = models.matchpoint
-    if request.args.get("tournament"):
-        mp = request.args.get("tournament").lower() == "mp"
-        models.matchpoint = mp
     # And finally we deduct our position
     position_i = dealer_enum[seat]
     dealer = request.args.get("dealer")
@@ -1340,10 +1495,9 @@ def explain_auction():
     # Vulnerability (absolute format: None, NS, EW, All/Both)
     v = request.args.get("vul")
     vuln = parse_vuln(v)
+    # This request's scoring, systems and carding, on a copy of the shared models
+    models = request_models()
     mp = models.matchpoint
-    if request.args.get("tournament"):
-        mp = request.args.get("tournament").lower() == "mp"
-        models.matchpoint = mp
     # And finally we deduct our position
     position_i = dealer_enum[seat]
     dealer = request.args.get("dealer")
@@ -1474,7 +1628,7 @@ def claim():
         hand_str = request.args.get("hand").replace('_','.')
         dummy_str = request.args.get("dummy").replace('_','.')
         played = request.args.get("played")
-        details = request.args.get("details")
+        details = query_flag("details")
         cards = [played[i:i+2] for i in range(0, len(played), 2)]
         #print(played)
         #print(cards, len(cards))
@@ -1491,6 +1645,12 @@ def claim():
             result = {"message":"No dummy provided"}
             print(result)
             return json.dumps(result)
+
+        problem = deal_problem(hand_str, dummy_str, cards)
+        if problem:
+            result = {"error": f"Not a possible deal: {problem}"}
+            print(result)
+            return json.dumps(result), 400
 
         seat = request.args.get("seat")
         # Vulnerability (absolute format: None, NS, EW, All/Both)
@@ -1649,10 +1809,9 @@ def autoplay():
         np.random.seed(hash_integer)
         framework.set_seed(hash_integer)
 
-        mp = models.matchpoint      
-        if request.args.get("tournament"):
-            mp = request.args.get("tournament").lower() == "mp"
-            models.matchpoint = mp
+        # This request's scoring, systems and carding, on a copy of the shared models
+        models = request_models()
+        mp = models.matchpoint
 
         # Get dealer and vulnerability from parameters or board number
         if dealer_param:
@@ -2254,12 +2413,17 @@ def robots_txt():
     return Response(content, mimetype='text/plain')
 
 if __name__ == "__main__":
+    # Before the port opens, so no request pays for the first inference
+    models.warm_up()
     print(Back.BLACK)
     try:
         # Run the Flask app with gevent server
+        # No connection limit and no timeout: gevent starts a greenlet per connection
         http_server = WSGIServer((host, port), app)
-        http_server.spawn = 4 #Create 4 Workers
-        http_server.connection_timeout = 120  # Set timeout to 120 seconds
+        if sys.platform != 'win32':
+            gevent.signal_handler(signal.SIGTERM, stop_taking_requests, http_server)
         http_server.serve_forever()
+        if stopping:
+            wait_for_requests_in_flight()
     finally:
         print(Style.RESET_ALL)        

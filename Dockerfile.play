@@ -27,7 +27,8 @@ COPY src/gameapi.py \
      src/botbidder.py src/botcardplayer.py src/botopeninglead.py \
      src/sample.py src/claim.py src/util.py src/conf.py \
      src/objects.py src/deck52.py src/binary.py src/carding.py \
-     src/calculate.py src/scoring.py \
+     src/calculate.py src/scoring.py src/systems.py src/version_check.py \
+     src/healthlog.py \
      /app/
 ADD src/bidding /app/bidding/
 ADD src/nn /app/nn/
@@ -40,7 +41,7 @@ ADD src/suitc /app/suitc/
 ADD src/openinglead /app/openinglead/
 
 # Native libraries — Linux only (Windows DLLs, macOS dylibs, BGA windows/macos dropped)
-# dds3-linux/ holds the DDS 3.0.0 solver extension - it MUST be built for this
+# dds3-linux/ holds the DDS 3.1.0 solver extension - it MUST be built for this
 # image's Python (3.12); a 3.10 _dds3.so will fail to import (build from DDS repo).
 COPY bin/libsuitc.so /app/bin/
 COPY bin/dds3-linux /app/bin/dds3-linux/

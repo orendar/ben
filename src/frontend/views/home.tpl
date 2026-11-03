@@ -41,7 +41,7 @@
 	</head> 
 <body>
 <div class="center">
-    <h1>Play with BEN. Version 0.8.8.4</h1>
+    <h1>Play with BEN. Version 0.9.0.2</h1>
     <div style="margin-bottom: 15px;">
         <a href="/autoplay" style="padding: 8px 16px; background: #4CAF50; color: white; text-decoration: none; border-radius: 4px;">Autoplay (Generate PBN)</a>
         <a href="/api" style="padding: 8px 16px; background: #2196F3; color: white; text-decoration: none; border-radius: 4px; margin-left: 10px;">API Reference</a>
@@ -56,7 +56,10 @@
             <option value="0">BEN 2/1</option>
             <option value="1">BEN SAYC</option>
             <option value="2">GIB-BBO</option>
-            <option value="3">Default (21GF)</option>
+            <!-- Default selection: port 4443, the one gameserver.py and
+                 start_ben.sh use. The other three only exist if you started
+                 the extra instances with src/runservers.sh. -->
+            <option value="3" selected>Default (21GF)</option>
         </select><br>
         </div>
     </div>

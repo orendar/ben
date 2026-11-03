@@ -16,13 +16,16 @@ def load(fin):
     inside_auction_section = False
     inside_scoring_section = False
     dealer, vulnerable = None, None
+    hands_nesw = None
+    recommendation = None
     scoring_lines = []
     for line in fin:
         if line.startswith("% PBN") or line == "\n":
             if dealer != None:
                 board = {
                     'deal': ' '.join(hands_nesw),      
-                    'auction': dealer + " " + vulnerable + " " + ' '.join(auction_lines)
+                    'auction': dealer + " " + vulnerable + " " + ' '.join(auction_lines),
+                    'recommendation': recommendation
                 }
                 boards.append(board)            
                 if len(scoring_lines) > 0:
@@ -32,6 +35,7 @@ def load(fin):
                 auction_lines = []
                 scoring_lines = []
                 dealer= None
+                recommendation = None
         if inside_auction_section:
             if line.startswith('[') or line == "\n":  # Check if it's the start of the next tag
                 inside_auction_section = False
@@ -49,6 +53,13 @@ def load(fin):
                 inside_scoring_section = False
             else:
                 scoring_lines.append(line)  
+
+        # A PBN comment can carry the recommended (facit) auction, e.g.
+        # { RP 1F29 "Beginner Review I" #1 -- recommended auction: 1N P 2N P P }
+        if not inside_auction_section and not inside_scoring_section:
+            match = re.search(r'recommended auction:\s*(.*?)\s*\}?\s*$', line, re.IGNORECASE)
+            if match:
+                recommendation = re.sub(r'\s+', ' ', match.group(1)).upper().replace("NT", "N").replace("PASS", "P")
 
         if line.startswith('[Dealer'):
             dealer = extract_value(line)
@@ -73,7 +84,8 @@ def load(fin):
     if dealer != None:
         board = {
             'deal': ' '.join(hands_nesw),      
-            'auction': dealer + " " + vulnerable + " " + ' '.join(auction_lines)
+            'auction': dealer + " " + vulnerable + " " + ' '.join(auction_lines),
+            'recommendation': recommendation
         }
         boards.append(board)      
         if len(scoring_lines) > 0:

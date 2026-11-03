@@ -3,7 +3,7 @@
 This is a game engine for [bridge](https://en.wikipedia.org/wiki/Contract_bridge).
 It can be used as a robot player, to do analysis, or to develop AI for bridge.
 
-The engine is built using machine learning (neural networks) and [double dummy solver](https://github.com/dds-bridge/dds) through the python wrapper [python-dds](https://github.com/Afwas/python-dds).
+The engine is built using machine learning (neural networks) and the [double dummy solver](https://github.com/dds-bridge/dds), used through the `dds3` Python extension (see [src/ddsolver/README.md](src/ddsolver/README.md)).
 
 To get a first impression of how the engine plays, please take a look at the [demo](https://lorserker.github.io/ben/demo/demo.html), or watch the bridge streamer Peter Hollands [demo the robot](https://www.youtube.com/watch?v=onG_V7vwxUk&t=150s) on IntoBridge.
 
@@ -29,18 +29,16 @@ The bridge engine was developed on Linux. It will likely work on any other platf
 
 For __Mac M1/M2__ users: you need to install [Homebrew](https://brew.sh/) if you don't have it already, then `brew install boost`.
 
-On __Amazon__, there is an image Public_Ben_Bot_V1.2 for starting an instance of BEN. After starting the instance just log in and execute [start_ben_bot_screens.sh].
-
 For __Ubuntu__ users: you might have to install libboost using `sudo apt install libboost-thread-dev`.
 
 > **Double-dummy solver:** BEN's double-dummy solver uses the `dds3` extension (DDS 3.0.0), not the old `dds.dll` / `libdds.so`. Prebuilt copies are vendored per platform under `bin/dds3-win/`, `bin/dds3-linux/`, `bin/dds3-darwin/` and are loaded automatically. Each is a compiled extension **locked to Python 3.12**; to use a different Python or build for an unsupported platform, see [src/ddsolver/README.md](src/ddsolver/README.md). The `libdds` libraries kept under `bin/` are used only by the BGADLL/PIMC engine.
 
 #### Running natively on Linux (including WSL)
 
-Docker users need to do nothing — the image is built on Ubuntu 24.04 / Python 3.12. For a **native** (non-Docker) Linux install, note that the vendored `bin/dds3-linux/_dds3.so` is built on **Ubuntu 24.04** and therefore requires:
+Docker users need to do nothing — the image is built on Ubuntu 24.04 / Python 3.12. For a **native** (non-Docker) Linux install, note that the vendored native libraries require:
 
-- **glibc ≥ 2.38** — i.e. Ubuntu 24.04+, Debian 13+, Fedora 38+. On an older distro (e.g. Ubuntu 22.04, glibc 2.35) it fails at import with `version 'GLIBC_2.38' not found`. Run on a newer distro, or rebuild `dds3` against your glibc (see [src/ddsolver/README.md](src/ddsolver/README.md)).
-- **Python 3.12** — the extension is locked to the CPython minor version.
+- **glibc ≥ 2.34** — i.e. Ubuntu 22.04+, Debian 12+, RHEL 9+, Fedora 35+. `bin/dds3-linux/_dds3.so` itself needs only glibc 2.25; the 2.34 floor comes from `libEPBot.so` (BBA) and `BGADLL.so` (PIMC). On an older distro they fail to load with `version 'GLIBC_2.34' not found`.
+- **Python 3.12** — the `dds3` extension is locked to the CPython minor version.
 
 **WSL quick start (Ubuntu 24.04)** — the simplest way to run/test the Linux build outside Docker.
 
@@ -161,7 +159,6 @@ The examples run in jupyter notebooks, but it's also possible to just read them 
 - __[Bidding](src/examples/Bidding.ipynb)__ shows how you can use the engine to bid hands and to sample hands which are consistent with a given auction
 - __[Opening Leads](src/examples/OpeningLead.ipynb)__ illustrates how the engine "decides" which card to lead
 - __[Card-by-card Analysis](src/examples/CardByCardAnalysis.ipynb)__ this example shows how the engine can go through an already played hand, analyse every bid made and every card played, and find possible mistakes. You can also give it a hand you played on BBO to see what the engine "thinks" about your play
-- __[Single Dummy Estimates](src/examples/SingleDummyEstimates.ipynb)__ this exemplifies the use of a neural network to predict how many tricks declarer will take in a given contract on a given opening lead. As opposed to double dummy solvers, the results are approximate, but much faster.
 
 ## Play against itself and against other bots
 
@@ -199,7 +196,6 @@ Below is a list of features which aren't implemented in this engine yet, but you
 
 - [Free and Open Source Bridge AI Engine Released](https://bridgewinners.com/article/view/free-and-open-source-bridge-ai-engine-released/)
 - [Bridge AI: How Neural Networks Learn to Bid](https://bridgewinners.com/article/view/bridge-ai-how-neural-networks-learn-to-bid/)
-- [Play with Ben on IntoBridge](https://intobridge.com/news/play-with-robots-on-intobridge/)
 - [Meet Ben, a Bridge AI with a Difference](https://greatbridgelinks.com/meet-ben-a-bridge-ai-with-a-difference/)
 
 ## How to cite
@@ -218,4 +214,4 @@ Below is a list of features which aren't implemented in this engine yet, but you
 On Mac i use python3 and pip3
 
 ## Discord
-You are welcome to join our Discord server "BEN the bridge engine" at https://discord.gg/9vaTn2Em 
+You are welcome to join our Discord server "BEN the bridge engine" at https://discord.gg/xmAAgNSyHT 

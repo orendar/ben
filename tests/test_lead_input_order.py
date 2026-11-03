@@ -34,6 +34,12 @@ def test_v2_leads_cards_it_holds(kind):
     assert mass > 0.95 and top_held == 1.0, (mass, top_held)
 
 
+@pytest.mark.parametrize("name", ["LeadV3-NT-Both_2026-10-16", "LeadV3-Suit-Both_2026-10-16"])
+def test_leadv3_leads_cards_it_holds_in_declared_order(name):
+    mass, top_held = held_mass(os.path.join(TORCH_MODELS, name + ".pt"), "nt" if "NT" in name else "suit")
+    assert mass > 0.95 and top_held == 1.0, (mass, top_held)
+
+
 @pytest.mark.parametrize("kind", sorted(MODELS))
 def test_declared_order_does_not(kind):
     mass, top_held = held_mass(os.path.join(TORCH_MODELS, MODELS[kind] + ".pt"), kind)

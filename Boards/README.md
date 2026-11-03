@@ -1,3 +1,7 @@
+Several of the tools used below (`MergePBNFiles`, `Split_PBN`, `ExtractDatumScore`) are not in this
+repository. They are built from [Bridge-Robot-Utilities](https://github.com/ThorvaldAagaard/Bridge-Robot-Utilities).
+`pbn2bba` and `pbn2ben` are in BEN itself, as `src/pbn2bba.py` and `src/pbn2ben.py`, with PyInstaller specs in `install/`.
+
 First run
 
 ```MergePBNFiles.exe -d -r .```
@@ -16,7 +20,7 @@ that will generate a file in BBA-format, input-YYYY-MM-DD.bba - and also print a
 
 Now to speed up the process, we split the file in files with 200.000 deals, as we can run BBA on each file in paralel.
 
-```python split_and_test_for_duplicates.py```
+```python split_and_testfordublicates.py```
 
 It will create files that can be used as input to BBA. (*.BBA)
 
@@ -47,11 +51,41 @@ type output*.pbn > GIBxxxx.pbn
 
 or whatever name match the system used - xxx can be the version of BBA
 
-As BBA have some pretty strange doubles, we filter the deals while converting ti to BEN-format
+As BBA have some pretty strange doubles, we filter the deals before using them for training. This is done with `Split_PBN.exe`, which splits the PBN-file into OK boards and bad boards:
 
 ```
->python ..\src\pbn2ben_skip_doubled_making.py filename
+Split_PBN.exe filename [DatumScores.pkl]
 ```
+
+Without the second argument it uses `DatumScores.pkl` in the current folder; without any argument it opens a file dialog. The command line needs Split_PBN 1.0.23 or later.
+
+The boards that survive the filter end up in `<filename>-OK_boards.pbn`, and the rejected boards are written to companion files - `-disaster.pbn`, `-duplicates.pbn`, `-db_making.pbn`, `-db_not_making.pbn` and `-missing-DD.pbn`. It is the `-OK_boards.pbn` file that is used for training.
+
+`Split_PBN.exe` is not part of this repository - it is built from
+[Bridge-Robot-Utilities](https://github.com/ThorvaldAagaard/Bridge-Robot-Utilities) (`src/Split_PBN.py`,
+with a PyInstaller spec in `Install/`). The same repository also provides `MergePBNFiles` and
+`ExtractDatumScore` used elsewhere in this document.
+
+### Boards bid by another engine (Pidgin)
+
+Split_PBN needs the result tags that BBA and `bid_with_epbot.py` write on every board: `[Declarer]`, `[Contract]`, `[Result]` (double-dummy tricks), `[Score]` and the datum score. An engine that only writes the auctions needs one more step, `UpdateScore` from [Bridge-Robot-Utilities](https://github.com/ThorvaldAagaard/Bridge-Robot-Utilities), which adds those tags from the datum file.
+
+For Pidgin (github.com/hsperr/pidgin), from its repository root, bid every board of a deals file with the network (about 1,200 boards a second on a CPU):
+
+```
+python scripts/bid_pbn.py D:\GitHub\ben\BBA\Boards\Deals-2026-10-22.pbn D:\GitHub\ben\BBA\Boards\Deals-2026-10-22.PidginV2.pbn --model PidginV2
+```
+
+Then, from `BBA\Boards`:
+
+```
+UpdateScore.exe Deals-2026-10-22.PidginV2.pbn DatumScores-DD.pkl PidginV2.pbn
+Split_PBN.exe PidginV2.pbn DatumScores-DD.pkl
+```
+
+`UpdateScore` is new: until Bridge-Robot-Utilities' executables are rebuilt, run it from source with `python <Bridge-Robot-Utilities>\src\UpdateScore.py ...`.
+
+On the 1,262,483 boards of `Deals-2026-10-22.pbn`, Pidgin V2 kept 1,235,122 boards. It lost 26,673 to doubled-and-making contracts and 624 to disasters, against 15,147 and 820 for EPBot with the BEN-21GF card on the same deals: Pidgin doubles about twice as often (128,243 doubled contracts against 67,347), and about 79% of its doubles beat the contract.
 
 It will print the bad deals like this:
 
@@ -83,8 +117,8 @@ Before we start the training we have yet a filter we want to apply using the par
 So we execute 
 
 ```
-python ..\scripts\training\bidding\badcontracts.py input.ben
-
+python ..\src\badcontracts.py input.ben
+```
 
 Then run 
 ```pbn2ben.exe All.pbn```

@@ -1,5 +1,6 @@
 import json
 import numpy as np
+import websockets
 
 import deck52
 
@@ -137,7 +138,17 @@ class HumanBidSocket:
 
         print(f"Human bid: {bid}")
         print("auction: ", auction)
-        new_auction = auction + [bid] 
+
+        # "Hint" and "Alert" are UI controls, not calls - the driver handles them
+        # and never appends them to the auction. Explaining an auction with one
+        # of them tacked on reaches BBA's BID2ID lookup and raises KeyError,
+        # killing the connection with a 1011. (Only visible once BBA is enabled,
+        # and only after a real bid exists, since explain() bails out early in
+        # both of those cases.)
+        if bid in ("Hint", "Alert"):
+            return BidResp(bid=bid, candidates=[], samples=[], shape=-1, hcp=-1, who = "Human", quality=None, alert=False, explanation=None)
+
+        new_auction = auction + [bid]
         explanation, alert = self.botbidder.explain(new_auction)
 
         return BidResp(bid=bid, candidates=[], samples=[], shape=-1, hcp=-1, who = "Human", quality=None, alert=alert, explanation=explanation)
@@ -171,6 +182,14 @@ class HumanLeadSocket:
                 else:    
                     return CardResp(card=Card.from_symbol(human_card), candidates=candidates, samples=samples, shape=-1, hcp=-1, quality=None, who = "Human", claim = -1)
 
+            # Give up as soon as the socket is gone. Retrying a dead connection
+            # spins this loop at full CPU, which starves the event loop and
+            # stops the server answering anyone else. The "going away" check
+            # below only catches one of the several close reasons websockets
+            # reports - a browser tab closing yields "no close frame received
+            # or sent" or "received 1000 (OK)".
+            except websockets.exceptions.ConnectionClosed:
+                raise
             except Exception as ex:
                 print(f"Exception receiving card ", ex)
                 if "going away" in str(ex):
@@ -267,6 +286,10 @@ class HumanCardPlayerSocket(HumanCardPlayer):
                     return human_card
                 else:
                     return deck52.encode_card(human_card)
+            # See the note in HumanLead.async_lead - a closed socket must end
+            # the loop, not be retried forever.
+            except websockets.exceptions.ConnectionClosed:
+                raise
             except Exception as ex:
                 print(f"Exception receiving card", ex)
                 if "going away" in str(ex):

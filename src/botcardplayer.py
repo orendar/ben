@@ -42,7 +42,8 @@ class CardPlayer:
         self.n_tricks_taken = 0
         self.missing_cards = (13 -  np.array(binary.get_shape_array(self.hand52)) -  np.array(binary.get_shape_array(self.public52))).astype(int)
         self.missing_cards_initial = self.missing_cards.copy()
-        self.verbose = verbose
+        # Card-play output can be silenced independently of bidding via [cardplay] verbose
+        self.verbose = verbose and getattr(models, "play_verbose", True)
         self.level = int(contract[0])
         self.init_x_play(binary.parse_hand_f(32)(public_hand_str), self.level, self.strain_i)
         self.dds = ddsolver
@@ -191,7 +192,7 @@ class CardPlayer:
                 new_e_tricks = round((pimc_e_tricks * weight + e_tricks * (1-weight)),2) if pimc_e_tricks is not None and e_tricks is not None else None
                 new_e_score = round((pimc_e_score * weight + e_score * (1-weight)),2) if pimc_e_score is not None and e_score is not None else None
                 new_e_make = round((pimc_e_make * weight + e_make * (1-weight)),2) if pimc_e_make is not None and e_make is not None else None
-                new_msg = msg +"|" if msg else "" + engine + f" {weight*100:.0f}%|" + (pimc_msg or '')
+                new_msg = (msg + "|" if msg else "") + engine + f" {weight*100:.0f}%|" + (pimc_msg or '')
                 new_msg += f"|{pimc_e_tricks:.2f} {pimc_e_score:.2f} {pimc_e_make:.2f}"
                 new_msg += f"|BEN DD {(1-weight)*100:.0f}%|"
                 new_msg += f"{e_tricks:.2f} {e_score:.2f} {e_make:.2f}"
@@ -333,18 +334,21 @@ class CardPlayer:
         if self.verbose:
             print(f'Next card response time: {time.time() - t_start:0.4f}')
 
+        if getattr(self.models, 'play_nn_only', False):
+            return self.pick_card_nn_only(current_trick52, tricks52, play_status, samples, quality, card_scores_nn)
+
         card_resp_alphamju = []
         if self.models.alphamju_declaring and (self.player_i == 1 or self.player_i == 3) and trick_i > self.models.alphamju_trick and play_status != "Discard":
             card_resp, card_resp_alphamju = self.alphamju_evaluation(trick_i, play_status,leader_i,current_trick52,quality,worlds, samples, card_scores_nn)
             if card_resp:
                 return card_resp
 
-        # When play_status is discard, it might be a good idea to use PIMC even if it is not enabled
         preempted = features.get("preempted", False)
 
-        if play_status == "discard" and not self.models.pimc_use_discard:
+        # pimc_use_discarding = False: discards are decided by BEN's own DD alone
+        if play_status == "Discard" and not self.models.pimc_use_discarding:
             dd_resp_cards, claims = self.get_cards_dd_evaluation(trick_i, leader_i, tricks52, current_trick52, players_states, probability_of_occurence, quality)
-            self.update_with_alphamju(card_resp_alphamju, merged_card_resp)
+            self.update_with_alphamju(card_resp_alphamju, dd_resp_cards)
             card_resp = self.pick_card_after_dd_eval(trick_i, leader_i, current_trick52, tricks52, players_states, dd_resp_cards, bidding_scores, quality, samples, play_status, self.missing_cards, claims, shown_out_suits, card_scores_nn)
         else:                    
             if self.pimc_declaring and (self.player_i == 1 or self.player_i == 3):
@@ -400,6 +404,31 @@ class CardPlayer:
         if self.verbose:
             print(f'Play card response time: {time.time() - t_start:0.4f}')
         return card_resp
+
+    def pick_card_nn_only(self, current_trick52, tricks52, play_status, samples, quality, card_scores_nn):
+        # The neural network's card, with nothing else deciding (config play_nn_only): the legal
+        # card with the highest NN score. The small cards share one NN slot, so equal scores go to
+        # the lowest card.
+        card_nn = {c: float(s) for c, s in enumerate(card_scores_nn)}
+        legal = [c for c in range(52) if self.hand52[c] > 0]
+        if current_trick52:
+            same_suit = [c for c in legal if c // 13 == current_trick52[0] // 13]
+            if same_suit:
+                legal = same_suit
+        scores = {c: self.get_nn_score(deck52.card52to32(c), c, card_nn, play_status, tricks52) for c in legal}
+        # card code = 13 * suit + rank with the ace as 0, so a higher code is a lower card
+        ranked = sorted(legal, key=lambda c: (-scores[c], -c))
+        candidates = [self.create_card([0, 0, 0, 0], c, 0, 0, 0, "NN only", 0, round(scores[c], 3)) for c in ranked]
+        return CardResp(
+            card=Card.from_code(ranked[0]),
+            candidates=candidates,
+            samples=samples,
+            shape=-1,
+            hcp=-1,
+            quality=quality,
+            who="NN-only",
+            claim=-1
+        )
 
     def update_with_alphamju(self, card_resp_alphamju, merged_card_resp):
         for card, percent in card_resp_alphamju:
@@ -485,7 +514,7 @@ class CardPlayer:
         if self.verbose:
             print("Samples:", n_samples, " Solving:",len(hands_pbn))
         
-        dd_solved = self.dds.solve(self.strain_i, leader_i, current_trick52, hands_pbn, 3)
+        dd_solved = self.dds.solve(self.strain_i, leader_i, current_trick52, hands_pbn, 3, purpose="play")
         
         # if defending the target is another
         level = int(self.contract[0])
@@ -913,9 +942,9 @@ class CardPlayer:
                 # If we can take rest we don't adjust, then NN will decide if equal
                 # Another option could be to resample the hands without restrictions
                 if e_tricks >= 13 - trick_i:
-                    # Calculate valid claim cards
-                    # if card32 // 8 != self.strain_i - 1:
-                    adjust_card = 0
+                    # Keep the trump adjust, so drawing trump wins a tie with a side suit
+                    if card52 // 13 != self.strain_i - 1:
+                        adjust_card = 0
                 if card52 in bad_play:
                     adjust_card += -0.2            
 

@@ -81,6 +81,11 @@ def _vars(weights, path):
     return [np.asarray(group[str(i)]) for i in range(len(group))]
 
 
+def _nested(refs):
+    # Keras 3.15 saves a single input or output as a flat [name, 0, 0].
+    return [refs] if refs and isinstance(refs[0], str) else refs
+
+
 def build(keras_path):
     archive = zipfile.ZipFile(keras_path)
     config = json.loads(archive.read("config.json"))["config"]
@@ -171,8 +176,8 @@ def build(keras_path):
         nodes.append({"name": name, "op": op, "args": args, "inputs": srcs})
 
     spec = {
-        "inputs": [n[0] for n in config["input_layers"]],
-        "outputs": [n[0] for n in config["output_layers"]],
+        "inputs": [n[0] for n in _nested(config["input_layers"])],
+        "outputs": [n[0] for n in _nested(config["output_layers"])],
         "nodes": nodes,
         "source": os.path.basename(keras_path),
     }

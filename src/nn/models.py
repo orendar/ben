@@ -1,5 +1,7 @@
 import os
 import os.path
+import sys
+import time
 
 from configparser import ConfigParser
 
@@ -17,7 +19,7 @@ from nn.trick import Trick
 class Models:
 
     def __init__(self, name, model_version, n_cards_bidding, n_cards_play, bidder_model, opponent_model, contract_model, trick_model,binfo_model, lead_suit_model, lead_nt_model, sd_model, sd_model_no_lead, player_models, search_threshold, lead_threshold, 
-                 no_search_threshold, eval_after_bid_count, eval_opening_bid,eval_pass_after_bid_count, no_biddingqualitycheck_after_bid_count, min_passout_candidates, min_rescue_reward, min_bidding_trust_for_sample_when_rescue, max_estimated_score,
+                 no_search_threshold, eval_after_bid_count, eval_opening_bid,eval_pass_after_bid_count, no_biddingqualitycheck_after_bid_count, min_passout_candidates, min_rescue_reward, min_bidding_trust_for_sample_when_rescue, max_estimated_score, min_samples_for_rescue,
                  lead_accept_nn, ns, ew, bba_our_cc, bba_their_cc, use_bba, consult_bba, bba_trust, use_bba_rollout, use_bba_to_count_aces, estimator, claim, play_reward_threshold_NN, play_reward_threshold_NN_factor_IMP, play_reward_threshold_NN_factor_MP, check_remaining_cards, check_discard, double_dummy, lead_from_pips_nt, lead_from_pips_suit, min_opening_leads, sample_hands_for_review, use_biddingquality, use_biddingquality_in_eval, 
                  double_dummy_calculator, opening_lead_included, use_probability, matchpoint, pimc_verbose, pimc_use_declaring, pimc_use_defending, pimc_use_discarding, pimc_wait, pimc_start_trick_declarer, pimc_start_trick_defender, pimc_stop_trick_declarer, pimc_stop_trick_defender, pimc_constraints, 
                  pimc_constraints_each_trick, pimc_max_playouts, autoplaysingleton, pimc_max_threads, pimc_trust_NN, pimc_ben_dd_declaring, pimc_use_fusion_strategy, pimc_ben_dd_defending, pimc_apriori_probability, 
@@ -31,7 +33,8 @@ class Models:
                  use_real_imp_or_mp, use_real_imp_or_mp_bidding, use_real_imp_or_mp_opening_lead, lead_convention, check_final_contract, max_samples_checked,  
                  alert_supported, alert_threshold,
                  factor_to_translate_to_mp, factor_to_translate_to_imp, use_suit_adjust, suppress_warnings,
-                 reward_lead_partner_suit, trump_lead_penalty
+                 reward_lead_partner_suit, trump_lead_penalty,
+                 play_verbose=True, bidding_verbose=True
                  ):
         self.name = name
         self.model_version = model_version
@@ -57,6 +60,7 @@ class Models:
         self.min_passout_candidates = min_passout_candidates
         self.min_rescue_reward = min_rescue_reward
         self.min_bidding_trust_for_sample_when_rescue = min_bidding_trust_for_sample_when_rescue
+        self.min_samples_for_rescue = min_samples_for_rescue
         self.max_estimated_score = max_estimated_score
         self._lead_accept_nn = lead_accept_nn
         self.ns = ns
@@ -127,6 +131,11 @@ class Models:
         self.ace_exploration = ace_exploration
         self.ace_limiter = ace_limiter
         self.ace_verbose = ace_verbose
+        # When False, card-play bots stay quiet even if the global verbose flag is on,
+        # so you can keep bidding verbose while silencing the play. Read from [cardplay] verbose.
+        self.play_verbose = play_verbose
+        # Likewise for bidding output, read from [bidding] verbose.
+        self.bidding_verbose = bidding_verbose
         self.alphamju_declaring = alphamju_declaring
         self.alphamju_defending = alphamju_defending
         self.alphamju_trick = alphamju_trick
@@ -215,6 +224,9 @@ class Models:
         min_passout_candidates = conf.getint('bidding', 'min_passout_candidates', fallback=2)
         min_rescue_reward = conf.getint('bidding', 'min_rescue_reward', fallback=250)
         min_bidding_trust_for_sample_when_rescue = conf.getfloat('bidding','min_bidding_trust_for_sample_when_rescue',fallback=0.5)
+        # A rescue bid is decided by a majority vote over the samples, so it is noise
+        # with only a handful. Below this count we never evaluate a rescue at all.
+        min_samples_for_rescue = conf.getint('bidding', 'min_samples_for_rescue', fallback=15)
         max_estimated_score = conf.getint('bidding', 'max_estimated_score', fallback=300)
         use_biddingquality = conf.getboolean('bidding', 'use_biddingquality', fallback=False)
         check_final_contract = conf.getboolean('bidding', 'check_final_contract', fallback=False)
@@ -281,6 +293,14 @@ class Models:
         ace_limiter = conf.getboolean('ace', 'ace_limiter', fallback=False)
         ace_verbose = conf.getboolean('ace', 'ace_verbose', fallback=False)
 
+        # Independent switch for card-play output. Default True = follow the global verbose flag.
+        # Set to False to keep bidding verbose while silencing the play.
+        play_verbose = conf.getboolean('cardplay', 'verbose', fallback=True)
+
+        # Independent switch for bidding output. Default True = follow the global verbose flag.
+        # Set to False to keep card play verbose while silencing the bidding.
+        bidding_verbose = conf.getboolean('bidding', 'verbose', fallback=True)
+
         alphamju_declaring = conf.getboolean('alphamju', 'alphamju_declaring', fallback=False)
         alphamju_defending = conf.getboolean('alphamju', 'alphamju_defending', fallback=False)
         alphamju_trick = conf.getint('alphamju', 'alphamju_trick', fallback=6)
@@ -298,12 +318,12 @@ class Models:
         adjust_min2 = conf.getfloat('adjustments', 'adjust_min2', fallback=0.0002)
         adjust_min1_by = conf.getint('adjustments', 'adjust_min1_by', fallback=200)
         adjust_min2_by = conf.getint('adjustments', 'adjust_min2_by', fallback=200)
-        factor_to_translate_to_mp = conf.getint('adjustments', 'factor_to_translate_to_mp', fallback=10)
+        factor_to_translate_to_mp = conf.getint('adjustments', 'factor_to_translate_to_mp', fallback=500)
         factor_to_translate_to_imp = conf.getint('adjustments', 'factor_to_translate_to_imp', fallback=25)
         use_suit_adjust = conf.getboolean('adjustments', 'use_suit_adjust', fallback=False)
 
         reward_lead_partner_suit = conf.getfloat('adjustments', 'reward_lead_partner_suit', fallback=0)
-        trump_lead_penalty_str = conf.get('bidding', 'trump_lead_penalty', fallback=None)
+        trump_lead_penalty_str = conf.get('adjustments', 'trump_lead_penalty', fallback=None)
         if trump_lead_penalty_str:
             trump_lead_penalty = [float(x) for x in trump_lead_penalty_str.strip('[]').split(',')]
         else:
@@ -356,6 +376,15 @@ class Models:
         contract_model=Contract(path_provider.get_path(os.path.join(base_path, conf['contract']['contract'])))
         trick_model=Trick(path_provider.get_path(os.path.join(base_path, conf['contract']['trick'])))
         binfo_model=BidInfo(path_provider.get_path(os.path.join(base_path, conf['bidding']['info'])))
+        # The opponents' bidding info network (set in the opponent configs). Sampling takes the
+        # HCP and shape of the opponents from it, and of partner from binfo_model
+        opponent_info = conf.get('bidding', 'opponent_info', fallback=None)
+        if not opponent_info:
+            opponent_binfo_model = None
+        elif os.path.normcase(os.path.normpath(opponent_info)) == os.path.normcase(os.path.normpath(conf['bidding']['info'])):
+            opponent_binfo_model = binfo_model
+        else:
+            opponent_binfo_model = BidInfo(path_provider.get_path(os.path.join(base_path, opponent_info)))
         if verbose:
             print(f"Loaded contract and bidding info models")
 
@@ -375,7 +404,7 @@ class Models:
         if verbose:
             print(f"loaded {len(player_models)} player models")
 
-        return cls(
+        models = cls(
             name=name,
             model_version=model_version,
             n_cards_bidding=n_cards_bidding,
@@ -400,6 +429,7 @@ class Models:
             min_passout_candidates = min_passout_candidates,
             min_rescue_reward = min_rescue_reward,
             min_bidding_trust_for_sample_when_rescue = min_bidding_trust_for_sample_when_rescue,
+            min_samples_for_rescue = min_samples_for_rescue,
             max_estimated_score = max_estimated_score,
             lead_accept_nn=lead_accept_nn,
             ns=ns,
@@ -505,8 +535,15 @@ class Models:
             max_samples_checked=max_samples_checked,
             suppress_warnings=suppress_warnings,
             reward_lead_partner_suit=reward_lead_partner_suit,
-            trump_lead_penalty=trump_lead_penalty
+            trump_lead_penalty=trump_lead_penalty,
+            play_verbose=play_verbose,
+            bidding_verbose=bidding_verbose
         )
+        # Card play by the neural network alone: no double dummy, PIMC or SuitC. For measuring
+        # the play models themselves; off by default.
+        models.play_nn_only = conf.getboolean('cardplay', 'play_nn_only', fallback=False)
+        models.opponent_binfo_model = opponent_binfo_model
+        return models
 
     @property
     def search_threshold(self):

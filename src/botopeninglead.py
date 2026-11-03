@@ -27,8 +27,9 @@ class BotLead:
         self.seat = seat
         self.dealer = dealer
         self.sampler = sampler
-        self.verbose = verbose
-        self.hash_integer  = calculate_seed(hand_str)         
+        # Opening-lead output follows the card-play switch ([cardplay] verbose), not bidding
+        self.verbose = verbose and getattr(models, "play_verbose", True)
+        self.hash_integer  = calculate_seed(hand_str)
         if self.verbose:
             print(f"Setting seed (Sampling bidding info) from {hand_str}: {self.hash_integer}")
         self.dds = dds
@@ -479,7 +480,7 @@ class BotLead:
                 # lead is relative to the order in the PBN-file, so West is 0 here
             onlead = 0
                 
-            dd_solved = self.dds.solve(strain_i, onlead, [opening_lead52], hands_pbn, 1)
+            dd_solved = self.dds.solve(strain_i, onlead, [opening_lead52], hands_pbn, 1, purpose="lead")
 
             # Convert to plain Python list to avoid numpy scalar overhead in loop
             dd_max = dd_solved["max"][:n_accepted].tolist() if hasattr(dd_solved["max"], 'tolist') else list(dd_solved["max"][:n_accepted])
@@ -498,9 +499,14 @@ class BotLead:
 
         strain_i = bidding.get_strain_i(contract)
 
+        # The single dummy model takes 32-card hands (like the play models); the
+        # samples are in the bidding encoding, which is 24 cards from model version 3.
+        if self.models.n_cards_bidding != 32:
+            accepted_samples = binary.convert_hands(accepted_samples, self.models.n_cards_bidding, 32)
+
         X_sd[:,32 + strain_i] = 1
         # lefty (That is us)
-        X_sd[:,(32 + 5 + 0*32):(32 + 5 + 1*32)] = self.handbidding.reshape(32)
+        X_sd[:,(32 + 5 + 0*32):(32 + 5 + 1*32)] = binary.parse_hand_f(32)(self.hand_str).reshape(32)
         # dummy
         X_sd[:,(32 + 5 + 1*32):(32 + 5 + 2*32)] = accepted_samples[:,0,:].reshape((n_accepted, 32))
         # righty

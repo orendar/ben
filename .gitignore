@@ -1,6 +1,7 @@
 .DS_Store
 .ipynb_checkpoints
 __pycache__
+*.egg-info/
 
 scripts/match/bidding/training/html
 scripts/training/bidding/binary
@@ -103,6 +104,7 @@ src/logs/
 scripts/training/data/hands_data.pkl
 src/test.py
 BBA/Boards
+BBA/Run*/
 install/dist
 install/BEN
 install/MvsM
@@ -110,6 +112,7 @@ install/BBA/
 install/*.zip
 src/TMCGUI.settings.json
 install/BENAll
+install/BENAPI
 src/log.txt
 scripts/training/contract/jax
 src/suitc.txt
@@ -128,3 +131,8 @@ src/csharp/bin
 src/csharp/obj
 .claude/settings.local.json
 logs/
+
+demo/**/*.bak
+
+install/data-staging/
+debug.log

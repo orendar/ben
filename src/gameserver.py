@@ -1,3 +1,11 @@
+# PyInstaller: a frozen build has no python.exe and no suitc_worker.py on disk,
+# so SuitC re-launches *this* exe as its worker (`--suitc-worker <libpath>`).
+# Handle that argv first — before the heavy imports and before argparse, which
+# would otherwise reject the worker argv with "required: --name, --seat".
+import sys
+from suitc.suitc_worker import freeze_support as _suitc_freeze_support
+_suitc_freeze_support()
+
 import os
 import sys
 import platform
@@ -43,6 +51,7 @@ import argparse
 import game
 import human
 import conf
+from ddsolver.ddsrecorder import DDSRecorder
 import functools
 import numpy as np
 from websockets.exceptions import ConnectionClosedOK, ConnectionClosedError
@@ -55,7 +64,7 @@ import gc
 import psutil
 from nn.timing import ModelTimer
 
-version = '0.8.8.4'
+version = '0.9.0.2'
 init()
 
 # Check websockets version - 15.0+ removed path as handler argument
@@ -115,8 +124,12 @@ parser.add_argument("--auto", type=bool, default=False, help="BEN bids and plays
 parser.add_argument("--playonly", type=str_to_bool, default=False, help="Only play, no bidding")
 parser.add_argument("--matchpoint", type=str_to_bool, default=None, help="Playing match point")
 parser.add_argument("--seed", type=int, default=42, help="Seed for random")
+parser.add_argument("--ddsrecord", default=None, help="Record every DDS call to this file for later benchmarking with ddsreplay.py (.gz compresses; a directory gets one file per process)")
 
 args = parser.parse_args()
+
+# Before any DDSolver is built, so nothing is missed.
+DDSRecorder.configure(args.ddsrecord)
 
 configfile = args.config
 opponentfile = args.opponent

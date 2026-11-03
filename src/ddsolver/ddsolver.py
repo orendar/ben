@@ -1,18 +1,20 @@
 import sys
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import List
 from collections import Counter
 from objects import Card
 from colorama import Fore, Back, Style, init
 from nn.timing import ModelTimer
+from ddsolver.ddsrecorder import DDSRecorder
 
 init()
 
 
 def _load_dds3():
-    """Import the dds3 extension (DDS 3.0.0 Python interface).
+    """Import the dds3 extension (DDS 3.x Python interface).
 
     Tries a normal import first (dds3 installed as a wheel). If that fails,
     falls back to a copy vendored under BEN's bin/ directory.
@@ -66,7 +68,7 @@ def _load_dds3():
                 continue
 
     raise ImportError(
-        "Could not import the 'dds3' extension (DDS 3.0.0 Python interface).\n"
+        "Could not import the 'dds3' extension (DDS 3.x Python interface).\n"
         "Build it from the DDS repository and install or vendor it:\n"
         "  bazel build -c opt //python:dds3_wheel_dist   # produces a wheel in dist/\n"
         "  pip install dist/dds3-*.whl\n"
@@ -81,12 +83,33 @@ def _load_dds3():
 dds3 = _load_dds3()
 
 
-# One SolverContext per worker thread; solve_board_pbn releases the GIL during
-# the solve, so the pool threads run concurrently. 3.1.0 also parallelises the
-# batch API internally, but it defaults to every hardware thread -- any move to
-# solve_all_boards_pbn must pass max_threads explicitly or a server pool will
-# oversubscribe the box.
-_ctx_local = threading.local()
+def _gevent_patched_threading():
+    try:
+        from gevent import monkey
+        return monkey.is_module_patched('threading')
+    except ImportError:
+        return False
+
+
+# gameapi.py runs gevent's monkey.patch_all(), which turns the threads of a
+# concurrent.futures pool into greenlets sharing one OS thread, so the solves ran
+# one after the other (200 deals: 13 s instead of 2 s on 8 cores). Under gevent
+# the pool is gevent's own executor, which always uses native threads. Found by
+# grand-slam-bridge (PR #198).
+_REAL_THREADS = _gevent_patched_threading()
+if _REAL_THREADS:
+    from gevent.monkey import get_original
+    from gevent.threadpool import ThreadPoolExecutor as _NativeThreadPoolExecutor
+
+# DDS 3.0.0 removed internal multi-threading from the legacy batch API
+# (SolveAllBoards now solves sequentially). The modern model is one
+# SolverContext per worker thread; DDSolver parallelises with a thread pool,
+# and solve_board_pbn releases the GIL during the solve, so the threads run
+# concurrently. Each pool thread keeps its own SolverContext - per OS thread,
+# so under gevent the original thread-local, not the patched per-greenlet one.
+# 3.1.0 parallelises the batch API internally but defaults to every hardware
+# thread: any move to solve_all_boards_pbn must pass max_threads explicitly.
+_ctx_local = get_original('_thread', '_local')() if _REAL_THREADS else threading.local()
 
 
 def _thread_context():
@@ -111,16 +134,30 @@ class DDSolver:
         # 0 = one thread per CPU core.
         workers = max_threads if (max_threads and max_threads > 0) else (os.cpu_count() or 4)
         self._workers = workers
-        self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="dds")
+        if _REAL_THREADS:
+            self._pool = _NativeThreadPoolExecutor(max_workers=workers)
+        else:
+            self._pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="dds")
         if verbose:
-            sys.stderr.write(f"DDSolver loaded — DDS {self.version()} - dds mode {dds_mode} - {workers} solver threads\n")
+            sys.stderr.write(f"DDSolver loaded — DDS {self.version()} - dds mode {dds_mode} - {workers} solver threads"
+                             f"{' (native threads under gevent)' if _REAL_THREADS else ''}\n")
+        # No-op unless --ddsrecord / BEN_DDS_RECORD asked for a recording. If the
+        # entry point already opened one, this just labels it with the DDS build
+        # actually in use. See ddsrecorder.py / ddsreplay.py.
+        DDSRecorder.configure(dds_version=self.version(), dds_mode=dds_mode,
+                              threads=workers)
 
     def version(self):
         return "3.1.0"
 
     def calculatepar(self, hand, vuln, print_result=True):
         with ModelTimer.time_call('dds_par'):
-            return self._calculatepar_impl(hand, vuln, print_result)
+            t0 = time.perf_counter()
+            result = self._calculatepar_impl(hand, vuln, print_result)
+            if DDSRecorder.enabled:
+                DDSRecorder.record_par(hand, vuln, result,
+                                       (time.perf_counter() - t0) * 1000)
+            return result
 
     def _calculatepar_impl(self, hand, vuln, print_result=True):
         # vulnerable
@@ -167,10 +204,24 @@ class DDSolver:
         remaining = sum(1 for c in pbn if c not in '. ')
         return (52 - remaining - len(current_trick)) // 4 + 1
 
-    def solve(self, strain_i, leader_i, current_trick, hands_pbn, solutions):
+    def solve(self, strain_i, leader_i, current_trick, hands_pbn, solutions, purpose=""):
+        """Solve a batch of sampled hands with double-dummy.
+
+        purpose is a short tag describing *why* DDS was invoked (e.g. "play",
+        "claimcheck", "lead", "bid"). It is folded into the timing label so the
+        MODEL TIMING SUMMARY separates, say, card-play evaluations from claim
+        checks at the same trick instead of lumping them into one opaque count.
+        """
         trick = self._trick_number(hands_pbn, current_trick)
-        with ModelTimer.time_call(f'dds_solve_t{trick:02d}', items=len(hands_pbn)):
+        label = f'dds_solve_t{trick:02d}_{purpose}' if purpose else f'dds_solve_t{trick:02d}'
+        with ModelTimer.time_call(label, items=len(hands_pbn)):
+            t0 = time.perf_counter()
             results = self.solve_helper(strain_i, leader_i, current_trick, hands_pbn, solutions)
+            elapsed_ms = (time.perf_counter() - t0) * 1000
+
+        if DDSRecorder.enabled:
+            DDSRecorder.record_solve(strain_i, leader_i, current_trick, hands_pbn,
+                                     solutions, purpose, trick, results, elapsed_ms)
 
         return results
 

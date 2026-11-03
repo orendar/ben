@@ -37,14 +37,14 @@ robocopy ..\src\config\Robots "BBA\config" WBridge5-Sayc.conf
 
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E righty*
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E lefty*
-robocopy ..\models\TF2Models "BBA\models\TF2Models" /E Lead-*
+robocopy ..\models\TF2Models "BBA\models\TF2Models" /E Lead*
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E dummy_*
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E decl_*
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E BEN-*
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E Blue*
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E GIB-*
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E Lia-*
-robocopy ..\models\TF2Models "BBA\models\TF2Models" /E Q-Plus*
+robocopy ..\models\TF2Models "BBA\models\TF2Models" /E QPlus*
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E Shark-*
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E Robo-Sayc-*
 robocopy ..\models\TF2Models "BBA\models\TF2Models" /E WBridge5-*
@@ -55,7 +55,7 @@ robocopy ..\models\TF2Models "BBA\models\TF2Models" /E Trick*
 robocopy dist\TMCGUI "BBA" /E
 robocopy dist\table_manager_client "BBA" /E
 robocopy dist\table_manager_client\_internal\bin "BBA\bin" /E
-robocopy ..\src\nn "BBA\nn" *tf2.py*
+robocopy ..\src\nn "BBA\nn" *tf2.py* keras_compat.py
 robocopy ..\bin "BBA\bin" /E
 copy ..\src\ben.ico "BBA"
 copy ..\src\logo.png "BBA"

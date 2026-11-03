@@ -11,7 +11,7 @@ from objects import BidResp, CandidateBid
 from bidding import bidding
 from collections import defaultdict
 
-from util import hand_to_str, calculate_seed, find_vuln_text, save_for_training
+from util import hand_to_str, calculate_seed, find_vuln_text, save_for_training, follow_suit
 from colorama import Fore, Style, init
 from nn.timing import ModelTimer
 
@@ -29,7 +29,8 @@ class BotBid:
         self.seat = seat
         self.dealer = dealer
         self.sampler = sampler
-        self.verbose = verbose
+        # Bidding output can be silenced independently of card play via [bidding] verbose
+        self.verbose = verbose and getattr(models, "bidding_verbose", True)
         self.sample_boards_for_auction = sampler.sample_boards_for_auction
         self.samples = []
         self.eval_after_bid_count = models.eval_after_bid_count
@@ -133,8 +134,12 @@ class BotBid:
         if not self.models.check_final_contract:
             return False
 
-        # If no samples we can't evaluate rescue bid
-        if len(samples) == 0:
+        # The rescue bid is decided by a majority vote over the samples and scored from
+        # their average, so with only a handful of samples it is noise, not a simulation.
+        # This mirrors the min_sample_hands_auction guard used for the normal simulation.
+        if len(samples) < self.models.min_samples_for_rescue:
+            if self.verbose:
+                print(f"No rescue, too few samples: {len(samples)} < {self.models.min_samples_for_rescue}")
             return False
 
         # never rescue on first bid
@@ -270,7 +275,9 @@ class BotBid:
             ev_candidates = []
             ev_scores = {}
             # we would like to have the same samples including pips for all calculations
-            if self.models.double_dummy_calculator:
+            # The PBN hands are only needed by the DD calculator and the BBA rollout
+            hands_np_as_pbn = None
+            if self.models.double_dummy_calculator or self.models.use_bba_rollout:
                 hands_np_as_pbn = self.translate_hands(hands_np, self.hand_str, sample_count)
             # Candidates are scored on the same deals and their rollouts converge
             # on the same contracts, so a quarter of the solves are exact repeats.
@@ -345,7 +352,7 @@ class BotBid:
                     print("Adjust for trust in NN", candidate.bid, candidate.insta_score, candidate.bid[0] in ["5", "6", "7"], "Samples:", hands_np.shape[0])
                 if not candidate.bid[0] in ["5", "6", "7"]:
                 # Adding some bonus to the bid selected by the neural network
-                    if hands_np.shape[0] == self.sampler.min_sample_hands_auction:
+                    if hands_np.shape[0] <= self.sampler.min_sample_hands_auction:
                         # We only have the minimum number of samples, so they are often of bad quality
                         # So we add more trust to the NN
                         adjust += self.models.adjust_NN_Few_Samples * candidate.insta_score
@@ -513,14 +520,33 @@ class BotBid:
                                 ev_c = candidate.with_expected_score_imp(score, adjust)
                                 ev_candidates_mp_imp.append(ev_c)
 
+                # The MP/IMP estimate is only as good as the samples behind it. If the samples
+                # didn't really fit the auction, or we found almost none of them, the simulation
+                # is noise - with a single sample the MP values collapse to exactly -1/0/+1 -
+                # so we fall back on the neural network, like the expected score branch below
+                trust_simulation = True
+                if self.models.use_biddingquality:
+                    if quality < self.sampler.bidding_threshold_sampling:
+                        trust_simulation = False
+                        if self.verbose:
+                            print(f"Bidding quality to bad, so we select using NN {quality} - {self.sampler.bidding_threshold_sampling}")
+                    elif sample_count < self.sampler.min_sample_hands_auction:
+                        trust_simulation = False
+                        if self.verbose:
+                            print(f"To few samples to trust the simulation, so we select using NN {sample_count} - {self.sampler.min_sample_hands_auction}")
+
                 if self.models.matchpoint:
                     if self.verbose:
                         print(f"Sorting for MP {expected_score}")
-                    candidates = sorted(ev_candidates_mp_imp, key=lambda c: (c.expected_mp + c.adjust, round(c.insta_score, 2)), reverse=True)
+                    simulated = lambda c: c.expected_mp + c.adjust
                 else:
                     if self.verbose:
                         print(f"Sorting for IMP {expected_score}")
-                    candidates = sorted(ev_candidates_mp_imp, key=lambda c: (c.expected_imp + c.adjust, round(c.insta_score, 2)), reverse=True)
+                    simulated = lambda c: c.expected_imp + c.adjust
+                if trust_simulation:
+                    candidates = sorted(ev_candidates_mp_imp, key=lambda c: (simulated(c), round(c.insta_score, 2)), reverse=True)
+                else:
+                    candidates = sorted(ev_candidates_mp_imp, key=lambda c: (c.insta_score, simulated(c)), reverse=True)
                 ev_candidates = ev_candidates_mp_imp
             else:
                 # If the samples are bad we just trust the neural network
@@ -601,6 +627,13 @@ class BotBid:
                 sample for sample in samples if float(sample.split(" ")[5]) >= self.models.min_bidding_trust_for_sample_when_rescue
             ]
 
+            # min_bidding_trust_for_sample_when_rescue can shrink the set below the
+            # threshold we already checked on the unfiltered samples, so check again.
+            if len(filtered_samples) < self.models.min_samples_for_rescue:
+                if self.verbose:
+                    print(f"No rescue, too few samples above trust threshold: {len(filtered_samples)} < {self.models.min_samples_for_rescue}")
+                filtered_samples = []
+
             # Select random samples from the filtered list
             samples_to_check = self.rng.choice(filtered_samples, min(len(filtered_samples), self.models.max_samples_checked), replace=False)
 
@@ -629,8 +662,11 @@ class BotBid:
                         if hasattr(nn_tricks, 'numpy'):
                             nn_tricks = nn_tricks.numpy()
                         max_tricks = None
+                        # trick_score must be initialised outside the loop; resetting it per
+                        # iteration made the test below always true, so max_tricks became the
+                        # highest trick count above the threshold instead of the most likely one.
+                        trick_score = 0
                         for j in range(14):
-                            trick_score = 0
                             if nn_tricks[0][j] > 0.1:
                                 if bidding.ID2BID[i] in result:
                                     # Append new data to the existing entry
@@ -868,6 +904,7 @@ class BotBid:
                 return [CandidateBid(bid=bba_bid_resp.bid, insta_score=1, alert = True, who="BBA - Keycard response", explanation=bba_bid_resp.explanation)], False
 
         bid_softmax, alerts = self.next_bid_np(auction)
+        original_softmax = bid_softmax.copy()
 
         #print(bid_softmax, alerts)
 
@@ -972,13 +1009,24 @@ class BotBid:
             # set the score for the bid just processed to zero so it is out of the loop
             bid_softmax[bid_i] = 0
 
+        # If the NN put its weight on illegal bids, every legal bid can be below 0.01
+        # and the loop above ends empty-handed. Fall back to the best legal bid.
+        if len(candidates) == 0:
+            for bid_i in np.argsort(-original_softmax):
+                if bidding.can_bid(bidding.ID2BID[bid_i], auction):
+                    if not self.models.suppress_warnings:
+                        sys.stderr.write(f"No candidate above 0.01 for {'-'.join(auction).replace('PASS', 'P').replace('PAD_START-', '')} with {self.hand_str}, using best legal bid {bidding.ID2BID[bid_i]} ({original_softmax[bid_i]:.4f})\n")
+                    alert = alerts[0] > self.models.alert_threshold if self.models.alert_supported else None
+                    candidates.append(CandidateBid(bid=bidding.ID2BID[bid_i], insta_score=original_softmax[bid_i], alert = alert))
+                    break
+
         # Adding an PASS, as a possible bid, even if it is not suggested by the nn
         if self.models.eval_pass_after_bid_count > 0 and no_bids > self.models.eval_pass_after_bid_count:
             for candidate in candidates:
                 if candidate.bid == 'PASS':
                     break
             else:
-                candidates.append(CandidateBid(bid=bidding.ID2BID[2], insta_score=0.1, alert = None, Who = "Config", explanation = "Pass after bid count"))
+                candidates.append(CandidateBid(bid=bidding.ID2BID[2], insta_score=0.1, alert = None, who = "Config", explanation = "Pass after bid count"))
 
         if self.verbose:
             print("\n".join(str(bid) for bid in candidates))
@@ -1200,10 +1248,6 @@ class BotBid:
         
         return auction_np
     
-    def transform_hand(self, hand):
-        handplay = binary.parse_hand_f(self.models.n_cards_play)(deck52.handxxto52str(hand, self.models.n_cards_bidding))            
-        return handplay[0]
-
 
     def expected_tricks_sd(self, hands_np, auctions_np):
         n_samples = hands_np.shape[0]
@@ -1216,7 +1260,7 @@ class BotBid:
         B_ftrs = np.zeros((n_samples, 15))
         
 # Apply the function to each 1D array along the third dimension
-        hands_np_play = hands_np if self.models.n_cards_bidding == self.models.n_cards_play else  np.apply_along_axis(self.transform_hand, 2, hands_np)                
+        hands_np_play = hands_np if self.models.n_cards_bidding == self.models.n_cards_play else  binary.convert_hands(hands_np, self.models.n_cards_bidding, self.models.n_cards_play)                
 
 
         for i in range(n_samples):
@@ -1240,17 +1284,22 @@ class BotBid:
 
                 X_ftrs[i,:], B_ftrs[i,:] = binary.get_auction_binary_for_lead(sample_auction, handbidding, handplay, self.vuln, self.dealer, self.models)
         
-        # We have a problem as we need to select different model based on the contract
-        # if contract[1] == "N":
-        #    lead_softmax = self.models.lead_nt_model.model(x_ftrs, b_ftrs)
-        #else:
-        #    lead_softmax = self.models.lead_suit_model.model(x_ftrs, b_ftrs)
-
+        # The lead model depends on the contract, as in botopeninglead.py: NT model for
+        # the notrump samples, suit model for the rest (all pass samples are ignored)
         t_lead_start = time.time()
-        lead_softmax = self.models.lead_suit_model.pred_fun(X_ftrs, B_ftrs)
+        nt_samples = strains == 0
+        lead_softmax = None
+        for samples, lead_model in ((nt_samples, self.models.lead_nt_model), (~nt_samples, self.models.lead_suit_model)):
+            if np.any(samples):
+                softmax = lead_model.pred_fun(X_ftrs[samples], B_ftrs[samples])
+                if lead_softmax is None:
+                    lead_softmax = np.zeros((n_samples, softmax.shape[1]))
+                lead_softmax[samples] = softmax
         if self.verbose:
             print(f"Lead model inference ({X_ftrs.shape[0]} samples): {(time.time() - t_lead_start)*1000:.2f} ms")
-        
+
+        # Only a card the leader holds can be led
+        lead_softmax = follow_suit(lead_softmax, hands_np_play[s_all, (declarers + 1) % 4], np.zeros((n_samples, 4)))
         lead_cards = np.argmax(lead_softmax, axis=1)
         
         X_sd = np.zeros((n_samples, 32 + 5 + 4*32))
@@ -1280,7 +1329,7 @@ class BotBid:
         contracts = []
 
         # Apply the function to each 1D array along the third dimension
-        hands_np_play = hands_np if self.models.n_cards_bidding == self.models.n_cards_play else np.apply_along_axis(self.transform_hand, 2, hands_np)                
+        hands_np_play = hands_np if self.models.n_cards_bidding == self.models.n_cards_play else binary.convert_hands(hands_np, self.models.n_cards_bidding, self.models.n_cards_play)                
 
         for i in range(n_samples):
             sample_auction = [bidding.ID2BID[bid_i] for bid_i in list(auctions_np[i, :]) if bid_i != 1]
@@ -1350,7 +1399,7 @@ class BotBid:
         for (strain, leader), indices in groups.items():
             todo = [i for i in indices if (hands_np_as_pbn[i], strain, leader) not in memo]
             if todo:
-                dd_solved = self.ddsolver.solve(strain, leader, [], [hands_np_as_pbn[i] for i in todo], 1)
+                dd_solved = self.ddsolver.solve(strain, leader, [], [hands_np_as_pbn[i] for i in todo], 1, purpose="bid")
                 for j, i in enumerate(todo):
                     memo[(hands_np_as_pbn[i], strain, leader)] = dd_solved["max"][j]
             for i in indices:

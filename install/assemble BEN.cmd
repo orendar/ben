@@ -5,7 +5,7 @@ rem script only robocopies the existing dist\ output into the BEN\ layout.
 
 robocopy ..\models\TF2Models "BEN\models\TF2Models" /E righty*
 robocopy ..\models\TF2Models "BEN\models\TF2Models" /E lefty*
-robocopy ..\models\TF2Models "BEN\models\TF2Models" /E Lead-*
+robocopy ..\models\TF2Models "BEN\models\TF2Models" /E Lead*
 robocopy ..\models\TF2Models "BEN\models\TF2Models" /E dummy_*
 robocopy ..\models\TF2Models "BEN\models\TF2Models" /E decl_*
 robocopy ..\models\TF2Models "BEN\models\TF2Models" /E SD_*
@@ -26,5 +26,5 @@ copy ..\src\ben.ico "BEN"
 robocopy dist\gameserver "BEN" /E
 robocopy dist\appserver "BEN" /E
 robocopy dist\BEN "BEN" /E
-robocopy ..\src\nn "BEN\nn" *tf2.py*
+robocopy ..\src\nn "BEN\nn" *tf2.py* keras_compat.py
 robocopy ..\bin "BEN\bin" /E
